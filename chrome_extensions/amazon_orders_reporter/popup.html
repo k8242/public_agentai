@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amazon Orders Year Exporter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="popup-header">
+    <div class="popup-logo">
+      <span class="logo-amz">amazon</span>
+      <span class="logo-tag">Year Report Exporter</span>
+    </div>
+    <div id="account-pill" class="account-pill">Checking tab...</div>
+  </header>
+
+  <main class="popup-body">
+    <div id="not-amazon-view" class="notice-card" style="display: none;">
+      <div class="notice-title">Open Amazon Your Orders</div>
+      <p class="notice-desc">
+        Navigate to your logged-in Amazon <strong>Your Orders</strong> page to export all pages of a given year into a single categorized HTML report.
+      </p>
+      <button type="button" id="open-amazon-orders-btn" class="btn btn-primary btn-full">
+        Open Amazon Your Orders ↗
+      </button>
+    </div>
+
+    <div id="exporter-view">
+      <div class="field-group">
+        <label for="year-select" class="field-label">Select Year / Time Period (Drives Page Dropdown)</label>
+        <select id="year-select" class="field-select">
+          <option value="months-3">past 3 months</option>
+          <option value="year-2026">2026</option>
+          <option value="year-2025">2025</option>
+          <option value="year-2024">2024</option>
+          <option value="year-2023">2023</option>
+        </select>
+        <div id="detected-count-hint" class="field-hint">
+          Steps through Page 1 → Last Page automatically in your active tab.
+        </div>
+        <div id="cache-status-hint" class="field-hint cache-hint"></div>
+      </div>
+
+      <div class="options-card">
+        <label class="checkbox-row">
+          <input type="checkbox" id="embed-images-cb" checked />
+          <div>
+            <div class="cb-title">Embed Product Thumbnails (Base64)</div>
+            <div class="cb-desc">1st Col Sortable Dates (Placed / Delivered) • Customizable Categories (Christmas Presents, Grocery, Sports &amp; Fitness, UNCATEGORIZED) • Persistent Cache.</div>
+          </div>
+        </label>
+      </div>
+
+      <div class="action-buttons">
+        <button type="button" id="start-download-btn" class="btn btn-primary btn-full">
+          ⬇ Download Single HTML Report
+        </button>
+        <button type="button" id="start-preview-btn" class="btn btn-secondary btn-full">
+          ↗ Preview Report in New Tab
+        </button>
+        <button type="button" id="rebuild-cache-btn" class="btn btn-secondary btn-full" style="display: none;">
+          ⚡ Instant Rebuild from Cached Orders
+        </button>
+        <button type="button" id="stop-export-btn" class="btn btn-danger btn-full" style="display: none;">
+          ■ Stop &amp; Save Collected Orders
+        </button>
+      </div>
+
+      <!-- Custom Category Rule Quick-Adder -->
+      <details class="custom-rule-details">
+        <summary>⚙ Custom Category Rules &amp; Cache</summary>
+        <div class="custom-rule-body">
+          <input type="text" id="rule-kw-input" class="rule-input" placeholder="Keyword (e.g. pickleball)" />
+          <input type="text" id="rule-high-input" class="rule-input" placeholder="High Category (e.g. Sports &amp; Fitness)" />
+          <input type="text" id="rule-fine-input" class="rule-input" placeholder="Finer Category (e.g. Pickleball Gear)" />
+          <button type="button" id="add-rule-btn" class="btn btn-secondary btn-full">
+            + Save Custom Keyword Rule
+          </button>
+        </div>
+      </details>
+
+      <div id="progress-box" class="progress-box" style="display: none;">
+        <div class="progress-track">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <div id="progress-status" class="progress-status">Starting...</div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="popup-footer">
+    <span>Sortable Dates • Custom Categories • Persistent Cache</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

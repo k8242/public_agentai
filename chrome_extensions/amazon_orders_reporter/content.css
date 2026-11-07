@@ -1,0 +1,212 @@
+/* content.css - Styles for the in-page Amazon Orders Year Report Exporter banner */
+
+#amz-year-exporter-banner {
+  font-family: "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: linear-gradient(180deg, #f8fafa 0%, #f0f2f2 100%);
+  border: 1px solid #007185;
+  border-left: 5px solid #007185;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0 16px 0;
+  color: #0f1111;
+  box-shadow: 0 2px 6px rgba(15, 17, 17, 0.08);
+}
+
+.amz-exp-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.amz-exp-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.amz-exp-badge {
+  background-color: #131921;
+  color: #ffd814;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.amz-exp-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f1111;
+}
+
+.amz-exp-subtitle {
+  font-size: 12px;
+  color: #565959;
+}
+
+.amz-exp-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.amz-exp-select {
+  height: 31px;
+  padding: 0 26px 0 10px;
+  border-radius: 8px;
+  border: 1px solid #888c8c;
+  background-color: #ffffff;
+  font-size: 13px;
+  color: #0f1111;
+  cursor: pointer;
+}
+
+.amz-exp-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #0f1111;
+  cursor: pointer;
+  user-select: none;
+}
+
+.amz-exp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 31px;
+  padding: 0 13px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.amz-exp-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.amz-exp-btn-primary {
+  background-color: #ffd814;
+  border-color: #fcd200;
+  color: #0f1111;
+  box-shadow: 0 2px 5px rgba(213, 217, 217, 0.5);
+}
+
+.amz-exp-btn-primary:hover:not(:disabled) {
+  background-color: #f7ca00;
+  border-color: #f2c200;
+}
+
+.amz-exp-btn-secondary {
+  background-color: #ffffff;
+  border-color: #888c8c;
+  color: #0f1111;
+}
+
+.amz-exp-btn-secondary:hover:not(:disabled) {
+  background-color: #f7fafa;
+}
+
+.amz-exp-btn-stop {
+  background-color: #fff5f5;
+  border-color: #cc0c39;
+  color: #cc0c39;
+}
+
+.amz-exp-cat-drawer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #c5c9c9;
+}
+
+.amz-exp-cat-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.amz-exp-cat-box {
+  background: #ffffff;
+  border: 1px solid #d5d9d9;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.amz-exp-cat-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f1111;
+  margin-bottom: 6px;
+}
+
+.amz-exp-cat-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.amz-exp-input {
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid #888c8c;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #0f1111;
+  flex: 1;
+  min-width: 110px;
+}
+
+.amz-exp-cache-stats {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #565959;
+}
+
+.amz-exp-progress-wrap {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #d5d9d9;
+  display: none;
+}
+
+.amz-exp-progress-wrap.active {
+  display: block;
+}
+
+.amz-exp-progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background-color: #e3e6e6;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.amz-exp-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #007185 0%, #00a8e1 100%);
+  border-radius: 99px;
+  transition: width 0.25s ease;
+}
+
+.amz-exp-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #0f1111;
+}

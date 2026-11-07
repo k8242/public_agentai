@@ -1,0 +1,74 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Orders Year Report Exporter (Human + AI Agent Ready)",
+  "version": "1.1.0",
+  "description": "Downloads all pages of Amazon orders for a selected year into a single self-contained HTML report with thumbnails, dates, costs, and 2-tier product categories.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "*://*.amazon.com/*",
+    "*://*.amazon.co.uk/*",
+    "*://*.amazon.ca/*",
+    "*://*.amazon.de/*",
+    "*://*.amazon.co.jp/*",
+    "*://*.amazon.fr/*",
+    "*://*.amazon.es/*",
+    "*://*.amazon.it/*",
+    "*://*.amazon.com.au/*",
+    "*://*.amazon.in/*",
+    "*://*.amazon.com.mx/*",
+    "*://*.amazon.com.br/*",
+    "*://m.media-amazon.com/*",
+    "*://images-na.ssl-images-amazon.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Export Amazon Orders Year Report",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.amazon.com/your-orders/*",
+        "*://*.amazon.com/gp/your-account/order-history*",
+        "*://*.amazon.com/gp/css/order-history*",
+        "*://*.amazon.com/gp/legacy/order-history*",
+        "*://*.amazon.co.uk/your-orders/*",
+        "*://*.amazon.co.uk/gp/your-account/order-history*",
+        "*://*.amazon.co.uk/gp/css/order-history*",
+        "*://*.amazon.ca/your-orders/*",
+        "*://*.amazon.ca/gp/your-account/order-history*",
+        "*://*.amazon.ca/gp/css/order-history*",
+        "*://*.amazon.de/your-orders/*",
+        "*://*.amazon.de/gp/your-account/order-history*",
+        "*://*.amazon.co.jp/your-orders/*",
+        "*://*.amazon.co.jp/gp/your-account/order-history*",
+        "*://*.amazon.fr/your-orders/*",
+        "*://*.amazon.es/your-orders/*",
+        "*://*.amazon.it/your-orders/*",
+        "*://*.amazon.com.au/your-orders/*",
+        "*://*.amazon.in/your-orders/*"
+      ],
+      "css": ["content.css"],
+      "js": ["report-builder.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

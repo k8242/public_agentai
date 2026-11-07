@@ -1,0 +1,271 @@
+/* popup.css - Styles for Chrome Extension Popup */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  padding: 0;
+  font-family: "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #0f1111;
+  background-color: #ffffff;
+}
+
+.popup-header {
+  background-color: #131921;
+  color: #ffffff;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.popup-logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.logo-amz {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  color: #ffffff;
+}
+
+.logo-tag {
+  background-color: #febd69;
+  color: #111111;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.account-pill {
+  font-size: 11px;
+  color: #d5d9d9;
+  background: #232f3e;
+  padding: 3px 8px;
+  border-radius: 99px;
+}
+
+.popup-body {
+  padding: 14px;
+}
+
+.notice-card {
+  background-color: #f7fafa;
+  border: 1px solid #d5d9d9;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+
+.notice-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.notice-desc {
+  font-size: 12px;
+  color: #565959;
+  line-height: 1.45;
+  margin: 0 0 12px 0;
+}
+
+.field-group {
+  margin-bottom: 12px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f1111;
+  margin-bottom: 5px;
+}
+
+.field-select {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #888c8c;
+  background-color: #f0f2f2;
+  font-size: 13px;
+  color: #0f1111;
+  cursor: pointer;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #565959;
+  margin-top: 5px;
+}
+
+.cache-hint {
+  color: #067d62;
+  font-weight: 600;
+}
+
+.options-card {
+  border: 1px solid #d5d9d9;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background-color: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.cb-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f1111;
+}
+
+.cb-desc {
+  font-size: 11px;
+  color: #565959;
+  line-height: 1.35;
+}
+
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.btn {
+  height: 33px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.btn-primary {
+  background-color: #ffd814;
+  border-color: #fcd200;
+  color: #0f1111;
+  box-shadow: 0 2px 5px rgba(213, 217, 217, 0.5);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #f7ca00;
+}
+
+.btn-secondary {
+  background-color: #ffffff;
+  border-color: #888c8c;
+  color: #0f1111;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #f7fafa;
+}
+
+.btn-danger {
+  background-color: #fff5f5;
+  border-color: #cc0c39;
+  color: #cc0c39;
+}
+
+.custom-rule-details {
+  margin-top: 12px;
+  border: 1px solid #d5d9d9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: #f8fafa;
+}
+
+.custom-rule-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #007185;
+  outline: none;
+}
+
+.custom-rule-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-input {
+  width: 100%;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid #888c8c;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.progress-box {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eaeded;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background-color: #e3e6e6;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #007185, #00a8e1);
+  transition: width 0.25s ease;
+}
+
+.progress-status {
+  font-size: 12px;
+  color: #0f1111;
+  line-height: 1.35;
+}
+
+.popup-footer {
+  background-color: #f0f2f2;
+  border-top: 1px solid #d5d9d9;
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #565959;
+  text-align: center;
+}
