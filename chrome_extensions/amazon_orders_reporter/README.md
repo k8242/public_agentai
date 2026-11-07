@@ -28,3 +28,13 @@ A Manifest V3 Chrome Extension that downloads **all pages** of your logged-in Am
    - The **Extension Icon** in your Chrome toolbar.
 3. Choose the **Year / Period** (e.g., `2026`), toggle **Embed images (Offline)** or **Deep invoice details** if desired, and click **⬇ Download Single HTML Report** (or **↗ Open in New Tab**).
 4. The extension will automatically start from **Page 1** of that year, follow pagination through the final page using your active browser session, and download `amazon-orders-<year>-report.html`.
+
+---
+
+## Screenshots
+
+1. Control panel injected.
+![control panel img](screenshot-added-control-panel.png)
+
+2. Report generated.
+![report_img](screenshot-report.png)
