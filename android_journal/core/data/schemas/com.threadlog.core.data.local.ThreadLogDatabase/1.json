@@ -1,0 +1,538 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "97c63b78751138d9f2462ace71e9fa60",
+    "entities": [
+      {
+        "tableName": "entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `zone_id` TEXT NOT NULL, `local_date` TEXT NOT NULL, `iso_week` TEXT NOT NULL, `body_raw` TEXT NOT NULL, `body_plain` TEXT NOT NULL, `reply_to_id` TEXT, `content_hash` TEXT NOT NULL, `updated_at_ms` INTEGER, `deleted_at_ms` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zoneId",
+            "columnName": "zone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localDate",
+            "columnName": "local_date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isoWeek",
+            "columnName": "iso_week",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bodyRaw",
+            "columnName": "body_raw",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bodyPlain",
+            "columnName": "body_plain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyToId",
+            "columnName": "reply_to_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "content_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_entries_created_at_ms",
+            "unique": false,
+            "columnNames": [
+              "created_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entries_created_at_ms` ON `${TABLE_NAME}` (`created_at_ms`)"
+          },
+          {
+            "name": "index_entries_local_date",
+            "unique": false,
+            "columnNames": [
+              "local_date"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entries_local_date` ON `${TABLE_NAME}` (`local_date`)"
+          },
+          {
+            "name": "index_entries_iso_week",
+            "unique": false,
+            "columnNames": [
+              "iso_week"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entries_iso_week` ON `${TABLE_NAME}` (`iso_week`)"
+          },
+          {
+            "name": "index_entries_deleted_at_ms",
+            "unique": false,
+            "columnNames": [
+              "deleted_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entries_deleted_at_ms` ON `${TABLE_NAME}` (`deleted_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `parent_id` TEXT, `full_path` TEXT NOT NULL, `leaf_name` TEXT NOT NULL, `root_category` TEXT NOT NULL, `color_token` TEXT NOT NULL, `aliases_json` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parent_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fullPath",
+            "columnName": "full_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "leafName",
+            "columnName": "leaf_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rootCategory",
+            "columnName": "root_category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "colorToken",
+            "columnName": "color_token",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasesJson",
+            "columnName": "aliases_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tags_full_path",
+            "unique": true,
+            "columnNames": [
+              "full_path"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_full_path` ON `${TABLE_NAME}` (`full_path`)"
+          }
+        ]
+      },
+      {
+        "tableName": "entry_tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`entry_id` TEXT NOT NULL, `tag_id` TEXT NOT NULL, `state` TEXT NOT NULL, `confidence` REAL NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`entry_id`, `tag_id`), FOREIGN KEY(`entry_id`) REFERENCES `entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`tag_id`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tagId",
+            "columnName": "tag_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "entry_id",
+            "tag_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_entry_tags_entry_id",
+            "unique": false,
+            "columnNames": [
+              "entry_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entry_tags_entry_id` ON `${TABLE_NAME}` (`entry_id`)"
+          },
+          {
+            "name": "index_entry_tags_tag_id",
+            "unique": false,
+            "columnNames": [
+              "tag_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entry_tags_tag_id` ON `${TABLE_NAME}` (`tag_id`)"
+          },
+          {
+            "name": "index_entry_tags_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_entry_tags_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "entries",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "entry_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tags",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tag_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "bookmarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `entry_id` TEXT NOT NULL, `url_raw` TEXT NOT NULL, `domain` TEXT NOT NULL, `title` TEXT, `note` TEXT, `is_collapsed` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`entry_id`) REFERENCES `entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "urlRaw",
+            "columnName": "url_raw",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isCollapsed",
+            "columnName": "is_collapsed",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_bookmarks_entry_id",
+            "unique": false,
+            "columnNames": [
+              "entry_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_bookmarks_entry_id` ON `${TABLE_NAME}` (`entry_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "entries",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "entry_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "attachments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `entry_id` TEXT NOT NULL, `local_filename` TEXT NOT NULL, `mime_type` TEXT NOT NULL, `byte_size` INTEGER NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `sha256` TEXT NOT NULL, `drive_file_id` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`entry_id`) REFERENCES `entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localFilename",
+            "columnName": "local_filename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mime_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "byteSize",
+            "columnName": "byte_size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "driveFileId",
+            "columnName": "drive_file_id",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_attachments_entry_id",
+            "unique": false,
+            "columnNames": [
+              "entry_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attachments_entry_id` ON `${TABLE_NAME}` (`entry_id`)"
+          },
+          {
+            "name": "index_attachments_sha256",
+            "unique": false,
+            "columnNames": [
+              "sha256"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attachments_sha256` ON `${TABLE_NAME}` (`sha256`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "entries",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "entry_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "auto_tag_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `pattern` TEXT NOT NULL, `match_type` TEXT NOT NULL, `target_tag_path` TEXT NOT NULL, `confidence` REAL NOT NULL, `enabled` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pattern",
+            "columnName": "pattern",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matchType",
+            "columnName": "match_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetTagPath",
+            "columnName": "target_tag_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "sync_entry_hashes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`entry_id` TEXT NOT NULL, `last_synced_content_hash` TEXT NOT NULL, `synced_at_ms` INTEGER NOT NULL, PRIMARY KEY(`entry_id`))",
+        "fields": [
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncedContentHash",
+            "columnName": "last_synced_content_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAtMs",
+            "columnName": "synced_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "entry_id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '97c63b78751138d9f2462ace71e9fa60')"
+    ]
+  }
+}
