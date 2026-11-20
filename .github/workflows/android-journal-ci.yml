@@ -1,0 +1,73 @@
+name: Android Journal CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android_journal/**'
+      - '.github/workflows/android-journal-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android_journal/**'
+      - '.github/workflows/android-journal-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-journal-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Test, Lint & Debug APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android_journal
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
+
+      - name: Run JVM & Android Debug unit tests
+        run: ./gradlew :core:model:test :core:parser:test testDebugUnitTest --stacktrace
+
+      - name: Run Android Lint
+        run: ./gradlew :app:lintDebug --stacktrace
+
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: threadlog-debug-apk
+          path: android_journal/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload test & lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: threadlog-test-lint-reports
+          path: |
+            android_journal/**/build/reports/tests/**
+            android_journal/app/build/reports/lint-results-debug.html
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,0 +1,33 @@
+# Local SDK & secret OAuth / signing config (PUBLIC REPO — NEVER COMMIT)
+local.properties
+google-services.json
+client_secret*.json
+*.keystore
+*.jks
+*.p12
+*.pem
+keystore.properties
+signing.properties
+.env
+.env.*
+
+# Gradle & Android build outputs
+.gradle/
+build/
+**/build/
+.cxx/
+.kotlin/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# IDE / Profiling
+.idea/
+*.iml
+*.hprof
+.navigation/
+
+# Always track the Gradle wrapper JAR
+!gradle/wrapper/gradle-wrapper.jar

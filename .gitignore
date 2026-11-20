@@ -1,0 +1,11 @@
+# Agent teamwork & orchestration metadata (never commit to public repo)
+.agents/
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~
