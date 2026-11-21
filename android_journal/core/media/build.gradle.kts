@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.core.media"
+    namespace = "io.github.k8242.threadlog.core.media"
     compileSdk = 35
 
     defaultConfig {

@@ -10,7 +10,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.feature.backup"
+    namespace = "io.github.k8242.threadlog.feature.backup"
     compileSdk = 35
 
     defaultConfig {

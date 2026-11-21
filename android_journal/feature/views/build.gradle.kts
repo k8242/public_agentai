@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.feature.views"
+    namespace = "io.github.k8242.threadlog.feature.views"
     compileSdk = 35
 
     defaultConfig {

@@ -10,7 +10,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.core.data"
+    namespace = "io.github.k8242.threadlog.core.data"
     compileSdk = 35
 
     defaultConfig {

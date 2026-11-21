@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.feature.search"
+    namespace = "io.github.k8242.threadlog.feature.search"
     compileSdk = 35
 
     defaultConfig {

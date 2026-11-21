@@ -30,11 +30,11 @@ val googleWebClientIdEscaped: String = googleWebClientIdRaw
     .replace("\r", "")
 
 android {
-    namespace = "com.threadlog.app"
+    namespace = "io.github.k8242.threadlog.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.threadlog.app"
+        applicationId = "io.github.k8242.threadlog"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

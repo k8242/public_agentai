@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.feature.chat"
+    namespace = "io.github.k8242.threadlog.feature.chat"
     compileSdk = 35
 
     defaultConfig {

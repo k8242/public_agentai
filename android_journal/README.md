@@ -55,7 +55,7 @@ To enable optional two-way Google Sheets + `ThreadLog_Media/` Drive backup:
 1. Create or select a project in the [Google Cloud Console](https://console.cloud.google.com/) and enable both the **Google Sheets API** and **Google Drive API**.
 2. Configure the **OAuth consent screen** and request only the minimal, non-restricted scope:
    `https://www.googleapis.com/auth/drive.file`
-3. Create an **Android OAuth 2.0 Client ID** matching package name `com.threadlog.app` and your debug/release signing keystore's SHA-1 fingerprint (inspectable locally via `./gradlew :app:signingReport`), plus a **Web Application OAuth 2.0 Client ID** if requesting offline tokens.
+3. Create an **Android OAuth 2.0 Client ID** matching package name `io.github.k8242.threadlog` and your debug/release signing keystore's SHA-1 fingerprint (inspectable locally via `./gradlew :app:signingReport`), plus a **Web Application OAuth 2.0 Client ID** if requesting offline tokens.
 4. Provide your OAuth Web Client ID locally via **gitignored** `android_journal/local.properties`:
    ```properties
    GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com

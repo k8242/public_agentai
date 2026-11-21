@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.threadlog.feature.autotag"
+    namespace = "io.github.k8242.threadlog.feature.autotag"
     compileSdk = 35
 
     defaultConfig {
