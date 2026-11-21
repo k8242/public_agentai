@@ -22,6 +22,7 @@ import io.github.k8242.threadlog.feature.backup.sync.WorkbookMapper
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertThrows
@@ -251,6 +252,51 @@ class BackupCodecsTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun provenanceMetadata_isEmbeddedInSyncMetaXlsxDocPropsAndZipManifest() = runTest {
+        val original = sampleWorkbook()
+
+        // 1. SyncMeta rows include generator and upstream provenance columns.
+        val metaRows = WorkbookMapper.metaToTableRows(original.meta)
+        assertThat(metaRows[0]).containsAtLeast("generator", "upstream")
+        assertThat(metaRows[1]).containsAtLeast(
+            WorkbookMapper.PROVENANCE_GENERATOR,
+            WorkbookMapper.PROVENANCE_UPSTREAM_URL,
+        )
+
+        // 2. XLSX output includes OOXML docProps/core.xml and docProps/app.xml with provenance.
+        val xlsxOut = ByteArrayOutputStream()
+        xlsxCodec.write(original, xlsxOut)
+        val xlsxEntries = readZipTextEntries(xlsxOut.toByteArray())
+        assertThat(xlsxEntries).containsKey("docProps/core.xml")
+        assertThat(xlsxEntries).containsKey("docProps/app.xml")
+        assertThat(xlsxEntries["docProps/core.xml"]).contains(WorkbookMapper.PROVENANCE_UPSTREAM_URL)
+        assertThat(xlsxEntries["docProps/app.xml"]).contains(WorkbookMapper.PROVENANCE_GENERATOR)
+
+        // 3. ZIP output includes manifest.json with generator, schemaOrigin, upstream, and license.
+        val zipOut = ByteArrayOutputStream()
+        zipCodec.write(original, emptyList(), InMemoryMediaStorage(), zipOut)
+        val zipEntries = readZipTextEntries(zipOut.toByteArray())
+        val manifestJson = zipEntries[ZipJsonMediaCodec.MANIFEST_JSON_ENTRY]
+        assertThat(manifestJson).isNotNull()
+        assertThat(manifestJson).contains(WorkbookMapper.PROVENANCE_GENERATOR)
+        assertThat(manifestJson).contains(WorkbookMapper.PROVENANCE_SCHEMA_ORIGIN)
+        assertThat(manifestJson).contains(WorkbookMapper.PROVENANCE_UPSTREAM_URL)
+        assertThat(manifestJson).contains(WorkbookMapper.PROVENANCE_LICENSE)
+    }
+
+    private fun readZipTextEntries(bytes: ByteArray): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
+            while (true) {
+                val entry = zis.nextEntry ?: break
+                result[entry.name] = zis.readBytes().toString(Charsets.UTF_8)
+                zis.closeEntry()
+            }
+        }
+        return result
     }
 
     private fun sampleWorkbook(): BackupWorkbook {

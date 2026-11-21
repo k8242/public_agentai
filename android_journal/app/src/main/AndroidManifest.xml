@@ -32,5 +32,16 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- Upstream attribution & provenance metadata (MIT License) -->
+        <meta-data
+            android:name="io.github.k8242.threadlog.upstream"
+            android:value="https://github.com/k8242/public_agentai" />
+        <meta-data
+            android:name="io.github.k8242.threadlog.license"
+            android:value="MIT" />
+        <meta-data
+            android:name="io.github.k8242.threadlog.author"
+            android:value="k8242" />
     </application>
 </manifest>

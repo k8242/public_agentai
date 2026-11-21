@@ -10,6 +10,7 @@ import io.github.k8242.threadlog.core.model.contract.MediaStorage
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
 import io.github.k8242.threadlog.core.parser.UuidV7
 import io.github.k8242.threadlog.feature.backup.BackupJson
+import io.github.k8242.threadlog.feature.backup.sync.WorkbookMapper
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -19,8 +20,18 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+@Serializable
+data class BackupArchiveManifest(
+    val generator: String = WorkbookMapper.PROVENANCE_GENERATOR,
+    val schemaOrigin: String = WorkbookMapper.PROVENANCE_SCHEMA_ORIGIN,
+    val upstream: String = WorkbookMapper.PROVENANCE_UPSTREAM_URL,
+    val license: String = WorkbookMapper.PROVENANCE_LICENSE,
+    val schemaVersion: Int = WorkbookMapper.SCHEMA_VERSION,
+)
 
 /**
  * Result of reading an offline `.zip` archive containing `workbook.json` and `media/<filename>` files.
@@ -31,8 +42,8 @@ data class ZipBackupPayload(
 )
 
 /**
- * Offline `.zip` archive codec bundling `workbook.json` (Kotlinx Serialization [BackupWorkbook])
- * and compressed media attachments under `media/<filename>`.
+ * Offline `.zip` archive codec bundling `manifest.json` (provenance metadata), `workbook.json`
+ * (Kotlinx Serialization [BackupWorkbook]), and compressed media attachments under `media/<filename>`.
  *
  * Enforces strict zip-slip path rejection and the hard `<= 640 KiB` attachment ceiling via
  * [MediaStorage.writeVerifiedBytes] on import.
@@ -58,13 +69,20 @@ class ZipJsonMediaCodec @Inject constructor(
     ) {
         val zipOut = ZipOutputStream(outputStream)
 
-        // 1. Write workbook.json.
+        // 1. Write manifest.json with provenance metadata.
+        val manifest = BackupArchiveManifest(schemaVersion = workbook.meta.schemaVersion)
+        val manifestBytes = json.encodeToString(manifest).toByteArray(Charsets.UTF_8)
+        zipOut.putNextEntry(ZipEntry(MANIFEST_JSON_ENTRY))
+        zipOut.write(manifestBytes)
+        zipOut.closeEntry()
+
+        // 2. Write workbook.json.
         val workbookJsonBytes = json.encodeToString(workbook).toByteArray(Charsets.UTF_8)
         zipOut.putNextEntry(ZipEntry(WORKBOOK_JSON_ENTRY))
         zipOut.write(workbookJsonBytes)
         zipOut.closeEntry()
 
-        // 2. Write distinct media files under media/<basename>.
+        // 3. Write distinct media files under media/<basename>.
         val writtenEntryNames = HashSet<String>()
         for (entry in entries) {
             for (attachment in entry.attachments) {
@@ -195,6 +213,7 @@ class ZipJsonMediaCodec @Inject constructor(
     }
 
     companion object {
+        const val MANIFEST_JSON_ENTRY: String = "manifest.json"
         const val WORKBOOK_JSON_ENTRY: String = "workbook.json"
         const val MEDIA_DIR_PREFIX: String = "media/"
         private const val MAX_WORKBOOK_JSON_BYTES: Long = 50L * 1024L * 1024L // 50 MiB

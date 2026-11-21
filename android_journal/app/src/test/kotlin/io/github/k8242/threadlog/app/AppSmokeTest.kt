@@ -3,6 +3,7 @@
 
 package io.github.k8242.threadlog.app
 
+import android.content.pm.PackageManager
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.google.common.truth.Truth.assertThat
@@ -23,6 +24,20 @@ class AppSmokeTest {
         if (System.getenv("GOOGLE_WEB_CLIENT_ID").isNullOrBlank()) {
             assertThat(BuildConfig.GOOGLE_WEB_CLIENT_ID).isEmpty()
         }
+    }
+
+    @Test
+    fun manifest_exposesUpstreamAttributionMetadata() {
+        val app = RuntimeEnvironment.getApplication()
+        val appInfo = app.packageManager.getApplicationInfo(
+            app.packageName,
+            PackageManager.GET_META_DATA,
+        )
+        val meta = appInfo.metaData
+        assertThat(meta.getString("io.github.k8242.threadlog.upstream"))
+            .isEqualTo("https://github.com/k8242/public_agentai")
+        assertThat(meta.getString("io.github.k8242.threadlog.license")).isEqualTo("MIT")
+        assertThat(meta.getString("io.github.k8242.threadlog.author")).isEqualTo("k8242")
     }
 
     @Test

@@ -45,6 +45,11 @@ data class MediaTokenRef(
 object WorkbookMapper {
 
     const val SCHEMA_VERSION: Int = 1
+    const val PROVENANCE_APP_NAME: String = "ThreadLog"
+    const val PROVENANCE_SCHEMA_ORIGIN: String = "io.github.k8242.threadlog"
+    const val PROVENANCE_GENERATOR: String = "$PROVENANCE_APP_NAME ($PROVENANCE_SCHEMA_ORIGIN)"
+    const val PROVENANCE_UPSTREAM_URL: String = "https://github.com/k8242/public_agentai"
+    const val PROVENANCE_LICENSE: String = "MIT"
 
     const val TAB_ENTRIES: String = "Entries"
     const val TAB_TAG_TREE: String = "TagTree"
@@ -80,6 +85,8 @@ object WorkbookMapper {
         "device_id",
         "entry_count",
         "checksum",
+        "generator",
+        "upstream",
     )
 
     /**
@@ -511,6 +518,8 @@ object WorkbookMapper {
             meta.deviceId,
             meta.entryCount.toString(),
             meta.checksum,
+            PROVENANCE_GENERATOR,
+            PROVENANCE_UPSTREAM_URL,
         ),
     )
 
