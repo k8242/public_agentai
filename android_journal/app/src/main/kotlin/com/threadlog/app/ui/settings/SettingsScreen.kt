@@ -35,6 +35,7 @@ import androidx.lifecycle.viewModelScope
 import com.threadlog.core.model.BackupCadence
 import com.threadlog.core.model.UserSettings
 import com.threadlog.core.model.WeekStart
+import com.threadlog.core.model.contract.BackupScheduler
 import com.threadlog.core.model.contract.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -46,6 +47,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
+    private val backupScheduler: BackupScheduler,
 ) : ViewModel() {
 
     val settings: StateFlow<UserSettings> = settingsRepository.settings.stateIn(
@@ -75,6 +77,7 @@ class SettingsViewModel @Inject constructor(
     fun setScheduledBackupCadence(cadence: BackupCadence) {
         viewModelScope.launch {
             settingsRepository.setScheduledBackupCadence(cadence)
+            backupScheduler.updateSchedule(cadence)
         }
     }
 }

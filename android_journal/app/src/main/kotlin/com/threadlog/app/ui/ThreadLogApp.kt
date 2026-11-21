@@ -1,8 +1,5 @@
 package com.threadlog.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -12,18 +9,14 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -34,7 +27,10 @@ import androidx.navigation.toRoute
 import com.threadlog.app.ui.settings.SettingsScreen
 import com.threadlog.core.model.navigation.ThreadLogRoute
 import com.threadlog.feature.autotag.ui.AutoTagReviewScreen
+import com.threadlog.feature.backup.ui.BackupScreen
 import com.threadlog.feature.chat.ui.ChatScreen
+import com.threadlog.feature.search.context.ContextWindowScreen
+import com.threadlog.feature.search.ui.SearchScreen
 import com.threadlog.feature.views.calendar.CalendarScreen
 import com.threadlog.feature.views.weekly.CompactWeeklyScreen
 
@@ -172,26 +168,38 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
                 )
             }
 
-            composable<ThreadLogRoute.Search> {
-                PlaceholderFeatureScreen(
-                    title = "Search",
-                    description = "Two-tier FTS5 + hidden auto-tag hybrid search will be wired in Batch 4.",
+            composable<ThreadLogRoute.Search> { entry ->
+                val args = entry.toRoute<ThreadLogRoute.Search>()
+                SearchScreen(
+                    initialQuery = args.initialQuery,
+                    onJumpToEntryInChat = { entryId, localDate ->
+                        jumpToChat(entryId = entryId, localDate = localDate)
+                    },
+                    onOpenContextWindow = { anchorEntryId, highlightQuery ->
+                        navController.navigate(
+                            ThreadLogRoute.ContextWindow(
+                                anchorEntryId = anchorEntryId,
+                                highlightQuery = highlightQuery,
+                            ),
+                        )
+                    },
                 )
             }
 
             composable<ThreadLogRoute.ContextWindow> { entry ->
                 val args = entry.toRoute<ThreadLogRoute.ContextWindow>()
-                PlaceholderFeatureScreen(
-                    title = "±12h Context Window",
-                    description = "Context window for entry ${args.anchorEntryId} will be wired in Batch 4.",
+                ContextWindowScreen(
+                    anchorEntryId = args.anchorEntryId,
+                    highlightQuery = args.highlightQuery,
+                    onNavigateBack = { navController.popBackStack() },
+                    onOpenInChat = { entryId, localDate ->
+                        jumpToChat(entryId = entryId, localDate = localDate)
+                    },
                 )
             }
 
             composable<ThreadLogRoute.Backup> {
-                PlaceholderFeatureScreen(
-                    title = "Backup & Restore",
-                    description = "Google Sheets + Drive sync and offline CSV/XLSX/ZIP backup will be wired in Batch 4.",
-                )
+                BackupScreen()
             }
 
             composable<ThreadLogRoute.AutoTagReview> {
@@ -208,32 +216,6 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderFeatureScreen(
-    title: String,
-    description: String,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(text = title, style = MaterialTheme.typography.headlineSmall)
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
         }
     }
 }
