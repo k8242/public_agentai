@@ -24,3 +24,36 @@ subprojects {
         }
     }
 }
+
+tasks.register("checkLicenseHeaders") {
+    group = "verification"
+    description = "Verifies that all Kotlin source files carry the SPDX MIT copyright header."
+    val ktFiles = fileTree(rootDir) {
+        include("**/src/**/*.kt")
+        exclude("**/build/**")
+    }
+    val rootPath = rootDir.toPath()
+    inputs.files(ktFiles)
+    doLast {
+        val copyrightPattern = Regex("^// Copyright \\(c\\) 202\\d(-\\d{4})? k8242$")
+        val spdxLine = "// SPDX-License-Identifier: MIT"
+        val missing = mutableListOf<String>()
+        ktFiles.files.sorted().forEach { file ->
+            val lines = file.readLines()
+            val valid = lines.size >= 2 &&
+                copyrightPattern.matches(lines[0]) &&
+                lines[1] == spdxLine
+            if (!valid) {
+                missing += rootPath.relativize(file.toPath()).toString()
+            }
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Missing or invalid SPDX MIT header in ${missing.size} file(s):\n" +
+                    missing.joinToString(separator = "\n") { "  - $it" } +
+                    "\nExpected lines 1-2:\n  // Copyright (c) 2026 k8242\n  // SPDX-License-Identifier: MIT",
+            )
+        }
+    }
+}
+

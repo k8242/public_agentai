@@ -1,3 +1,6 @@
+// Copyright (c) 2026 k8242
+// SPDX-License-Identifier: MIT
+
 package io.github.k8242.threadlog.core.parser
 
 import io.github.k8242.threadlog.core.model.contract.MessageParser

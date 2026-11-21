@@ -44,6 +44,9 @@ jobs:
       - name: Ensure gradlew is executable
         run: chmod +x gradlew
 
+      - name: Verify SPDX license headers
+        run: ./gradlew checkLicenseHeaders --stacktrace
+
       - name: Run JVM & Android Debug unit tests
         run: ./gradlew :core:model:test :core:parser:test testDebugUnitTest --stacktrace
 
