@@ -29,6 +29,18 @@ val googleWebClientIdEscaped: String = googleWebClientIdRaw
     .replace("\n", "")
     .replace("\r", "")
 
+val officialReleaseCertSha256Raw: String = (
+    localProps.getProperty("OFFICIAL_RELEASE_CERT_SHA256")
+        ?: System.getenv("OFFICIAL_RELEASE_CERT_SHA256")
+        ?: ""
+).trim()
+
+val officialReleaseCertSha256Escaped: String = officialReleaseCertSha256Raw
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\n", "")
+    .replace("\r", "")
+
 android {
     namespace = "io.github.k8242.threadlog.app"
     compileSdk = 35
@@ -41,6 +53,16 @@ android {
         versionName = "0.1.0"
 
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientIdEscaped\"")
+        buildConfigField(
+            "String",
+            "OFFICIAL_RELEASE_CERT_SHA256",
+            "\"$officialReleaseCertSha256Escaped\"",
+        )
+        buildConfigField(
+            "String",
+            "UPSTREAM_REPO_URL",
+            "\"https://github.com/k8242/public_agentai\"",
+        )
     }
 
     buildTypes {
