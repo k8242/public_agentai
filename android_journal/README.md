@@ -69,3 +69,9 @@ To enable optional two-way Google Sheets + `ThreadLog_Media/` Drive backup:
 ## CI / Automated Debug APK Builds
 
 GitHub Actions workflow [`.github/workflows/android-journal-ci.yml`](../.github/workflows/android-journal-ci.yml) is path-filtered to `android_journal/**` and runs on pushes/PRs to `main` (and via manual `workflow_dispatch`). Each run executes all pure-JVM and Android Debug unit tests, runs `:app:lintDebug`, builds `app-debug.apk`, and uploads the installable `threadlog-debug-apk` artifact (plus test/lint reports) on the workflow run summary page.
+
+## License, Attribution & Trademarks
+
+- **Code License**: MIT — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). All source and binary redistributions must retain the copyright notice and MIT permission notice.
+- **Brand & Trademarks**: The **ThreadLog** name, app icon, and `io.github.k8242.threadlog` package identity are reserved under [`TRADEMARKS.md`](TRADEMARKS.md). Forks and redistributed builds must rebrand while preserving MIT attribution.
+

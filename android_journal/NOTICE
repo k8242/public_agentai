@@ -1,0 +1,14 @@
+ThreadLog (android_journal)
+Copyright (c) 2026 k8242
+
+Upstream Repository: https://github.com/k8242/public_agentai (android_journal/)
+Application ID: io.github.k8242.threadlog
+License: MIT (see LICENSE)
+
+This software includes code originally authored by k8242 for ThreadLog.
+Under the MIT License, all source and binary redistributions (including
+compiled APKs/AABs and derivative applications) must retain the copyright
+notice and MIT permission notice from LICENSE.
+
+For brand name, icon, and package identity guidelines for forks and
+redistributions, see TRADEMARKS.md.
