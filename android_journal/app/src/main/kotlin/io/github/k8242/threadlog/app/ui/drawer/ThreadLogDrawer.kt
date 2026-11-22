@@ -307,7 +307,7 @@ fun ThreadLogDrawerSheet(
                             text = if (uiState.searchQuery.isNotBlank()) {
                                 "No topics, tags, or people matching \"${uiState.searchQuery}\""
                             } else {
-                                "No tags yet. Use @people or #tags in notes to populate your lists."
+                                "No tags yet. Use @people, #topics, or +projects in notes to populate your lists."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -317,7 +317,11 @@ fun ThreadLogDrawerSheet(
                 } else {
                     items(summaries, key = { it.tag.id }) { summary ->
                         val displayLabel = uiState.tagDisplayLabels[summary.tag.id] ?: summary.tag.leafName
-                        val prefix = if (summary.tag.rootCategory == TagRootCategory.PEOPLE) "@" else "#"
+                        val prefix = when (summary.tag.rootCategory) {
+                            TagRootCategory.PEOPLE -> "@"
+                            TagRootCategory.PROJECTS -> "+"
+                            else -> "#"
+                        }
                         val selected = isChatActive &&
                             activeChatFilter is ChatFeedFilter.TagSubtree &&
                             activeChatFilter.tagId == summary.tag.id

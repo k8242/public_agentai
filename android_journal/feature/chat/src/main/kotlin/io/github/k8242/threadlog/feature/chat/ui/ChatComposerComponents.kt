@@ -92,6 +92,7 @@ fun ChatComposer(
     resolveAttachmentPath: (String) -> String,
     onTextChanged: (text: String, cursor: Int) -> Unit,
     onSelectTagSuggestion: (Tag) -> Unit,
+    onCreateTriggeredTag: () -> Unit,
     onToggleSelectedTag: (String) -> Unit,
     onToggleComposerTask: () -> Unit,
     onImageBytesReceived: (ByteArray) -> Unit,
@@ -171,12 +172,16 @@ fun ChatComposer(
                 .fillMaxWidth()
                 .navigationBarsPadding(),
         ) {
-            // Live @/# autocomplete suggestions overlay
-            if (uiState.activeTagTrigger != null && uiState.tagSuggestions.isNotEmpty()) {
+            // Live @/#/+ autocomplete suggestions overlay
+            val activeTrigger = uiState.activeTagTrigger
+            val trimmedTriggerQuery = activeTrigger?.query?.trim()?.trim('/').orEmpty()
+            if (activeTrigger != null && (uiState.tagSuggestions.isNotEmpty() || trimmedTriggerQuery.isNotEmpty())) {
                 TagSuggestionList(
+                    activeTrigger = activeTrigger,
                     suggestions = uiState.tagSuggestions,
                     tagDisplayLabels = uiState.tagDisplayLabels,
                     onSelect = onSelectTagSuggestion,
+                    onCreateTriggeredTag = onCreateTriggeredTag,
                 )
                 HorizontalDivider()
             }
@@ -329,8 +334,8 @@ fun ChatComposer(
                         Text(
                             text = when {
                                 uiState.editingEntry != null -> "Edit journal entry..."
-                                uiState.composerIsTask -> "Add a TODO... (@people, #tags)"
-                                else -> "Write a note... (@people, #tags)"
+                                uiState.composerIsTask -> "Add a TODO... (@people, #topics, +projects)"
+                                else -> "Write a note... (@people, #topics, +projects)"
                             },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -369,16 +374,70 @@ fun ChatComposer(
 
 @Composable
 private fun TagSuggestionList(
+    activeTrigger: io.github.k8242.threadlog.core.model.parser.ActiveTagTrigger,
     suggestions: List<Tag>,
     tagDisplayLabels: Map<String, String>,
     onSelect: (Tag) -> Unit,
+    onCreateTriggeredTag: () -> Unit,
 ) {
+    val trimmedQuery = activeTrigger.query.trim().trim('/')
+    val hasExactMatch = trimmedQuery.isNotEmpty() && suggestions.any {
+        it.leafName.equals(trimmedQuery, ignoreCase = true) ||
+            it.fullPath.equals(trimmedQuery, ignoreCase = true)
+    }
+    val triggerPrefix = when (activeTrigger.kind) {
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PERSON_AT -> "@"
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PROJECT_PLUS -> "+"
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.ALL_HASH -> "#"
+    }
+    val createTargetPath = when (activeTrigger.kind) {
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PERSON_AT ->
+            if (trimmedQuery.startsWith("people/", ignoreCase = true)) trimmedQuery else "people/$trimmedQuery"
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PROJECT_PLUS ->
+            if (trimmedQuery.startsWith("projects/", ignoreCase = true)) trimmedQuery else "projects/$trimmedQuery"
+        io.github.k8242.threadlog.core.model.parser.TagTriggerKind.ALL_HASH ->
+            if (trimmedQuery.contains('/')) trimmedQuery else "topics/$trimmedQuery"
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 180.dp)
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
+        if (trimmedQuery.isNotEmpty() && !hasExactMatch) {
+            item(key = "create_triggered_tag") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onCreateTriggeredTag)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = "Create $triggerPrefix$trimmedQuery",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = createTargetPath,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
         items(suggestions, key = { it.id }) { tag ->
             val label = tagDisplayLabels[tag.id] ?: tag.leafName
             val (badgeBg, badgeFg) = tagColorPair(tag.colorToken)

@@ -157,7 +157,8 @@ class DefaultEntryRepository @Inject constructor(
         }
 
         return database.inWriteTransaction {
-            val distinctTagIds = userTagIds.distinct()
+            val resolvedInlineTagIds = resolveOrCreateInlineTags(parsed.inlineTags)
+            val distinctTagIds = (userTagIds + resolvedInlineTagIds).distinct()
             val validTags = if (distinctTagIds.isEmpty()) {
                 emptyList()
             } else {
@@ -199,6 +200,7 @@ class DefaultEntryRepository @Inject constructor(
                 updatedAtMs = null,
                 deletedAtMs = null,
                 taskStatus = taskStatus.name,
+                reactionsJson = "[]",
             )
 
             entryDao.upsert(entity)
@@ -228,6 +230,21 @@ class DefaultEntryRepository @Inject constructor(
 
             val parsed = messageParser.parse(newBodyRaw)
             val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
+
+            // Attach any newly typed inline @person / #topic / +project tags as USER tags.
+            val inlineTagIds = resolveOrCreateInlineTags(parsed.inlineTags)
+            if (inlineTagIds.isNotEmpty()) {
+                val inlineEntryTags = inlineTagIds.map { tagId ->
+                    EntryTagEntity(
+                        entryId = entryId,
+                        tagId = tagId,
+                        state = TagState.USER.name,
+                        confidence = 1.0f,
+                        updatedAtMs = updatedAtMs,
+                    )
+                }
+                tagDao.upsertEntryTags(inlineEntryTags)
+            }
 
             // Reconcile URL bookmarks: keep existing title/note/collapsed for unchanged URLs,
             // insert new ones collapsed, remove stale URLs.
@@ -259,7 +276,7 @@ class DefaultEntryRepository @Inject constructor(
                 bookmarkDao.upsertAll(newBookmarks)
             }
 
-            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs, taskStatus.
+            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs, taskStatus, reactionsJson.
             val updatedEntity = existing.copy(
                 bodyRaw = newBodyRaw,
                 bodyPlain = parsed.bodyPlain,
@@ -290,6 +307,110 @@ class DefaultEntryRepository @Inject constructor(
             )
             hydrator.recomputeAndPersistContentHash(entryId)
         }
+    }
+
+    override suspend fun toggleReaction(
+        entryId: String,
+        emoji: String,
+        nowMs: Long,
+    ) {
+        val cleaned = emoji.trim()
+        if (cleaned.isEmpty()) return
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            val current = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec
+                .decode(existing.reactionsJson)
+            val updated = if (cleaned in current) {
+                current.filterNot { it == cleaned }
+            } else {
+                current + cleaned
+            }
+            val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
+            entryDao.update(
+                existing.copy(
+                    reactionsJson = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec.encode(updated),
+                    updatedAtMs = updatedAtMs,
+                ),
+            )
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
+
+    private suspend fun resolveOrCreateInlineTags(
+        inlineTags: List<io.github.k8242.threadlog.core.model.parser.InlineTagToken>,
+    ): List<String> {
+        if (inlineTags.isEmpty()) return emptyList()
+
+        val existingTags = tagDao.getAll().map { it.toDomain() }
+        val resolvedIds = LinkedHashSet<String>()
+
+        for (token in inlineTags) {
+            val normalizedRaw = TagPathNormalizer.normalize(token.rawValue)
+            if (normalizedRaw.isEmpty()) continue
+            val rawLower = normalizedRaw.lowercase(Locale.ROOT)
+
+            when (token.kind) {
+                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PROJECT_PLUS -> {
+                    val match = if (normalizedRaw.contains('/')) {
+                        val targetPath = if (rawLower.startsWith("projects/")) normalizedRaw else "projects/$normalizedRaw"
+                        existingTags.firstOrNull { it.fullPath.equals(targetPath, ignoreCase = true) }
+                    } else {
+                        existingTags
+                            .filter { it.rootCategory == io.github.k8242.threadlog.core.model.TagRootCategory.PROJECTS }
+                            .firstOrNull {
+                                it.leafName.equals(normalizedRaw, ignoreCase = true) ||
+                                    it.aliases.any { alias -> alias.equals(normalizedRaw, ignoreCase = true) }
+                            }
+                    }
+                    if (match != null) {
+                        resolvedIds += match.id
+                    } else {
+                        val targetPath = if (rawLower.startsWith("projects/")) normalizedRaw else "projects/$normalizedRaw"
+                        resolvedIds += hydrator.ensureTagChain(targetPath).first.id
+                    }
+                }
+
+                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PERSON_AT -> {
+                    val match = if (normalizedRaw.contains('/')) {
+                        val targetPath = if (rawLower.startsWith("people/")) normalizedRaw else "people/$normalizedRaw"
+                        existingTags.firstOrNull { it.fullPath.equals(targetPath, ignoreCase = true) }
+                    } else {
+                        existingTags
+                            .filter { it.rootCategory == io.github.k8242.threadlog.core.model.TagRootCategory.PEOPLE }
+                            .firstOrNull {
+                                it.leafName.equals(normalizedRaw, ignoreCase = true) ||
+                                    it.aliases.any { alias -> alias.equals(normalizedRaw, ignoreCase = true) }
+                            }
+                    }
+                    if (match != null) {
+                        resolvedIds += match.id
+                    } else {
+                        val targetPath = if (rawLower.startsWith("people/")) normalizedRaw else "people/$normalizedRaw"
+                        resolvedIds += hydrator.ensureTagChain(targetPath).first.id
+                    }
+                }
+
+                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.ALL_HASH -> {
+                    val match = if (normalizedRaw.contains('/')) {
+                        existingTags.firstOrNull { it.fullPath.equals(normalizedRaw, ignoreCase = true) }
+                    } else {
+                        existingTags.firstOrNull {
+                            it.fullPath.equals(normalizedRaw, ignoreCase = true) ||
+                                it.leafName.equals(normalizedRaw, ignoreCase = true) ||
+                                it.aliases.any { alias -> alias.equals(normalizedRaw, ignoreCase = true) }
+                        }
+                    }
+                    if (match != null) {
+                        resolvedIds += match.id
+                    } else {
+                        val targetPath = if (normalizedRaw.contains('/')) normalizedRaw else "topics/$normalizedRaw"
+                        resolvedIds += hydrator.ensureTagChain(targetPath).first.id
+                    }
+                }
+            }
+        }
+
+        return resolvedIds.toList()
     }
 
     override suspend fun softDeleteEntry(entryId: String, nowMs: Long) {

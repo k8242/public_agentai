@@ -19,6 +19,7 @@ data class Entry(
     val updatedAtMs: Long? = null,     // Set on edit; null if never edited
     val deletedAtMs: Long? = null,     // Non-null = soft-deleted tombstone
     val taskStatus: TaskStatus = TaskStatus.NONE,
+    val reactions: List<String> = emptyList(),
 ) {
     val isEdited: Boolean get() = updatedAtMs != null && updatedAtMs > createdAtMs
     val isDeleted: Boolean get() = deletedAtMs != null
@@ -85,6 +86,7 @@ data class EntryWithDetails(
     val bookmarks: List<Bookmark>,
     val attachments: List<Attachment>,
     val replyPreview: ReplyPreview? = null,
+    val dailyOrdinal: Int = 0,
 ) {
     val visibleTags: List<EntryTag>
         get() = tags.filter { it.state == TagState.USER || it.state == TagState.AUTO_PROMOTED }

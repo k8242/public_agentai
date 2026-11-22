@@ -45,6 +45,8 @@ data class EntryEntity(
     val deletedAtMs: Long? = null,
     @ColumnInfo(name = "task_status", defaultValue = "NONE")
     val taskStatus: String = "NONE",
+    @ColumnInfo(name = "reactions_json", defaultValue = "[]")
+    val reactionsJson: String = "[]",
 )
 
 @Entity(

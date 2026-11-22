@@ -358,4 +358,36 @@ class DefaultMessageParserTest {
         assertThat(parser.detectTagTrigger("@Lex", -1)).isNull()
         assertThat(parser.detectTagTrigger("@Lex", 5)).isNull()
     }
+
+    @Test
+    fun detectTagTrigger_projectPlus_triggersAtBoundariesAndIgnoresArithmetic() {
+        assertThat(parser.detectTagTrigger("+", 1)).isEqualTo(
+            ActiveTagTrigger(TagTriggerKind.PROJECT_PLUS, "", 0, 1),
+        )
+        assertThat(parser.detectTagTrigger("Working on +journal-app", 23)).isEqualTo(
+            ActiveTagTrigger(TagTriggerKind.PROJECT_PLUS, "journal-app", 11, 23),
+        )
+        assertThat(parser.detectTagTrigger("(+alpha", 7)).isEqualTo(
+            ActiveTagTrigger(TagTriggerKind.PROJECT_PLUS, "alpha", 1, 7),
+        )
+        assertThat(parser.detectTagTrigger("2+2", 3)).isNull()
+        assertThat(parser.detectTagTrigger("C++", 3)).isNull()
+    }
+
+    @Test
+    fun parse_extractsInlineTags_ignoringCodeAndUrls() {
+        val raw = """
+            Met @Lex on +journal-app. Ideas: #ideas/ui
+            Check `code +ignored` and https://example.com/#frag?a+b
+            ```
+            +codeblock @nobody #nope
+            ```
+        """.trimIndent()
+        val parsed = parser.parse(raw)
+        assertThat(parsed.inlineTags).containsExactly(
+            io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.PERSON_AT, "Lex"),
+            io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.PROJECT_PLUS, "journal-app"),
+            io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.ALL_HASH, "ideas/ui"),
+        ).inOrder()
+    }
 }

@@ -20,6 +20,7 @@ data class SheetEntryRow(
     val updatedAtIso: String? = null,
     val deleted: Boolean,
     val taskStatus: String = "NONE",
+    val reactions: List<String> = emptyList(),
 )
 
 @Serializable

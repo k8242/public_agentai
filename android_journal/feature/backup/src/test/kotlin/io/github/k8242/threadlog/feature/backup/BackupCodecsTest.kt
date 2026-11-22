@@ -363,19 +363,25 @@ class BackupCodecsTest {
     }
 
     @Test
-    fun csvCodec_roundTripsTaskStatus_andDefaultsMissingLegacyColumnToNone() {
+    fun csvCodec_roundTripsTaskStatusAndReactions_andDefaultsMissingLegacyColumns() {
         val original = sampleWorkbook()
         val withTodo = original.copy(
             entries = original.entries.mapIndexed { idx, row ->
-                if (idx == 0) row.copy(taskStatus = "TODO") else row.copy(taskStatus = "DONE")
+                if (idx == 0) {
+                    row.copy(taskStatus = "TODO", reactions = listOf("\uD83D\uDC4D", "\uD83D\uDD25"))
+                } else {
+                    row.copy(taskStatus = "DONE", reactions = listOf("\u2705"))
+                }
             },
         )
         val out = ByteArrayOutputStream()
         csvCodec.write(withTodo, out)
         val imported = csvCodec.read(ByteArrayInputStream(out.toByteArray()))
         assertThat(imported.entries[0].taskStatus).isEqualTo("TODO")
+        assertThat(imported.entries[0].reactions).containsExactly("\uD83D\uDC4D", "\uD83D\uDD25").inOrder()
         if (imported.entries.size > 1) {
             assertThat(imported.entries[1].taskStatus).isEqualTo("DONE")
+            assertThat(imported.entries[1].reactions).containsExactly("\u2705")
         }
 
         val legacyCsv = """
@@ -385,6 +391,7 @@ class BackupCodecsTest {
         val legacyImported = csvCodec.read(ByteArrayInputStream(legacyCsv.toByteArray()))
         assertThat(legacyImported.entries).hasSize(1)
         assertThat(legacyImported.entries[0].taskStatus).isEqualTo("NONE")
+        assertThat(legacyImported.entries[0].reactions).isEmpty()
     }
 
     private class InMemoryMediaStorage : MediaStorage {

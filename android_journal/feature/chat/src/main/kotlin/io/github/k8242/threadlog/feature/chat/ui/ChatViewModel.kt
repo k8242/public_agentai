@@ -254,6 +254,41 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun toggleReaction(entryId: String, emoji: String) {
+        val cleaned = emoji.trim()
+        if (cleaned.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                entryRepository.toggleReaction(entryId = entryId, emoji = cleaned)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update reaction") }
+            }
+        }
+    }
+
+    fun createAndInsertTriggeredTag() {
+        val trigger = _uiState.value.activeTagTrigger ?: return
+        val raw = trigger.query.trim().trim('/')
+        if (raw.isEmpty()) return
+        val fullPath = when (trigger.kind) {
+            TagTriggerKind.PERSON_AT -> if (raw.startsWith("people/", ignoreCase = true)) raw else "people/$raw"
+            TagTriggerKind.PROJECT_PLUS -> if (raw.startsWith("projects/", ignoreCase = true)) raw else "projects/$raw"
+            TagTriggerKind.ALL_HASH -> if (raw.contains('/')) raw else "topics/$raw"
+        }
+        viewModelScope.launch {
+            try {
+                val created = tagRepository.createOrGetTagByPath(fullPath)
+                onSelectTagSuggestion(created)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to create tag") }
+            }
+        }
+    }
+
     fun onComposerTextChanged(text: String, cursor: Int) {
         val safeCursor = cursor.coerceIn(0, text.length)
         val trigger = messageParser.detectTagTrigger(text, safeCursor)
@@ -289,7 +324,11 @@ class ChatViewModel @Inject constructor(
             val end = trigger.endIndex.coerceIn(start, text.length)
             val before = text.substring(0, start)
             val after = text.substring(end)
-            val prefix = if (trigger.kind == TagTriggerKind.PERSON_AT) "@" else "#"
+            val prefix = when (trigger.kind) {
+                TagTriggerKind.PERSON_AT -> "@"
+                TagTriggerKind.PROJECT_PLUS -> "+"
+                TagTriggerKind.ALL_HASH -> "#"
+            }
             val mention = "$prefix${tag.leafName}"
             val needsSpace = after.isEmpty() || !after.first().isWhitespace()
             val replacement = if (needsSpace) "$mention " else mention
@@ -647,6 +686,7 @@ class ChatViewModel @Inject constructor(
 
         val pool = when (trigger.kind) {
             TagTriggerKind.PERSON_AT -> allTags.filter { it.rootCategory == TagRootCategory.PEOPLE }
+            TagTriggerKind.PROJECT_PLUS -> allTags.filter { it.rootCategory == TagRootCategory.PROJECTS }
             TagTriggerKind.ALL_HASH -> allTags
         }
 

@@ -72,6 +72,25 @@ internal object AliasesJsonCodec {
     }
 }
 
+internal object ReactionsJsonCodec {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun encode(reactions: List<String>): String =
+        json.encodeToString(
+            reactions.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+        )
+
+    fun decode(reactionsJson: String): List<String> {
+        if (reactionsJson.isBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<String>>(reactionsJson)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+        }.getOrDefault(emptyList())
+    }
+}
+
 /**
  * Deterministic SHA-256 content hash builder for 3-way sync diffing.
  */
@@ -86,6 +105,7 @@ internal object EntryContentHasher {
         bookmarkSignatures: Collection<String>,
         attachmentSha256s: Collection<String>,
         taskStatus: TaskStatus = TaskStatus.NONE,
+        reactions: Collection<String> = emptyList(),
     ): String {
         val canonical = buildString {
             append("v1\n")
@@ -99,6 +119,10 @@ internal object EntryContentHasher {
             append("media=").append(attachmentSha256s.sorted().joinToString(","))
             if (taskStatus != TaskStatus.NONE) {
                 append("\ntask=").append(taskStatus.name)
+            }
+            val cleanedReactions = reactions.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+            if (cleanedReactions.isNotEmpty()) {
+                append("\nreactions=").append(cleanedReactions.joinToString(","))
             }
         }
         return ContentHasher.sha256Hex(canonical)
@@ -119,6 +143,7 @@ internal fun EntryEntity.toDomain(): Entry =
         updatedAtMs = updatedAtMs,
         deletedAtMs = deletedAtMs,
         taskStatus = runCatching { TaskStatus.valueOf(taskStatus) }.getOrDefault(TaskStatus.NONE),
+        reactions = ReactionsJsonCodec.decode(reactionsJson),
     )
 
 internal fun TagEntity.toDomain(): Tag =

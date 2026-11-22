@@ -18,10 +18,16 @@ sealed interface InlineSpan {
     data class Url(val rawUrl: String, val domain: String, val isLong: Boolean) : InlineSpan
 }
 
+data class InlineTagToken(
+    val kind: TagTriggerKind,
+    val rawValue: String,
+)
+
 data class ParsedMessage(
     val blocks: List<MessageBlock>,
     val bodyPlain: String,
     val extractedUrls: List<ExtractedUrl>,
+    val inlineTags: List<InlineTagToken> = emptyList(),
 )
 
 data class ExtractedUrl(
@@ -33,12 +39,13 @@ data class ExtractedUrl(
 enum class TagTriggerKind {
     PERSON_AT,
     ALL_HASH,
+    PROJECT_PLUS,
 }
 
 data class ActiveTagTrigger(
     val kind: TagTriggerKind,
     val query: String,
-    val startIndex: Int,               // Index of '@' or '#' in composer text
+    val startIndex: Int,               // Index of '@', '#', or '+' in composer text
     val endIndex: Int,                 // Cursor index
 )
 

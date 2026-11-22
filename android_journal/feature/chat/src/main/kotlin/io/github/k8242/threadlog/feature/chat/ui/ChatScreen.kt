@@ -210,6 +210,7 @@ fun ChatScreen(
                 resolveAttachmentPath = viewModel::resolveAttachmentPath,
                 onTextChanged = viewModel::onComposerTextChanged,
                 onSelectTagSuggestion = viewModel::onSelectTagSuggestion,
+                onCreateTriggeredTag = viewModel::createAndInsertTriggeredTag,
                 onToggleSelectedTag = viewModel::toggleSelectedTag,
                 onToggleComposerTask = viewModel::toggleComposerTask,
                 onImageBytesReceived = viewModel::onImageBytesReceived,
@@ -286,6 +287,7 @@ fun ChatScreen(
                                 onManageTags = { tagPickerTarget = TagPickerTarget.ExistingEntry(item) },
                                 onToggleTask = { viewModel.toggleNoteTask(item.entry) },
                                 onToggleTaskDone = { viewModel.toggleTaskCompleted(item.entry) },
+                                onToggleReaction = { emoji -> viewModel.toggleReaction(item.entry.id, emoji) },
                                 onDelete = { viewModel.deleteEntry(item.entry.id) },
                                 onToggleBookmarkCollapsed = viewModel::toggleBookmarkCollapsed,
                                 onPromoteAutoTag = { tagId ->
@@ -392,14 +394,12 @@ private fun CompactChatHeaderBar(
     val title = when (activeFilter) {
         ChatFeedFilter.All -> "ThreadLog"
         is ChatFeedFilter.Todos -> "TODOs"
-        is ChatFeedFilter.TagSubtree -> {
-            if (activeFilter.fullPath.startsWith("people/", ignoreCase = true) ||
-                activeFilter.fullPath.equals("people", ignoreCase = true)
-            ) {
-                "@${activeFilter.displayLabel}"
-            } else {
-                "#${activeFilter.displayLabel}"
-            }
+        is ChatFeedFilter.TagSubtree -> when {
+            activeFilter.fullPath.startsWith("people/", ignoreCase = true) ||
+                activeFilter.fullPath.equals("people", ignoreCase = true) -> "@${activeFilter.displayLabel}"
+            activeFilter.fullPath.startsWith("projects/", ignoreCase = true) ||
+                activeFilter.fullPath.equals("projects", ignoreCase = true) -> "+${activeFilter.displayLabel}"
+            else -> "#${activeFilter.displayLabel}"
         }
     }
     val subtitle = when (activeFilter) {

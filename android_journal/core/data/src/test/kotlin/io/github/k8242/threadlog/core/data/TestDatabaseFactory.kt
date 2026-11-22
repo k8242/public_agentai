@@ -49,7 +49,7 @@ internal object TestDatabaseFactory {
         )
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.IO)
-            .addMigrations(ThreadLogDatabase.MIGRATION_1_2)
+            .addMigrations(ThreadLogDatabase.MIGRATION_1_2, ThreadLogDatabase.MIGRATION_2_3)
             .addCallback(ThreadLogDatabaseCallback())
             .build()
 

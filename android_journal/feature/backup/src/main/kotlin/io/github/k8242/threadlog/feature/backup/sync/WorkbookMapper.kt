@@ -69,6 +69,7 @@ object WorkbookMapper {
         "updated_at_iso",
         "deleted",
         "task_status",
+        "reactions",
     )
 
     val TAG_TREE_HEADERS: List<String> = listOf(
@@ -154,6 +155,7 @@ object WorkbookMapper {
             updatedAtIso = entry.updatedAtMs?.let { formatEpochMsWithZone(it, entry.zoneId) },
             deleted = entry.isDeleted,
             taskStatus = entry.taskStatus.name,
+            reactions = entry.reactions,
         )
     }
 
@@ -286,6 +288,7 @@ object WorkbookMapper {
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
             taskStatus = entry.entry.taskStatus.name,
+            reactions = entry.entry.reactions,
         )
     }
 
@@ -312,6 +315,7 @@ object WorkbookMapper {
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
             taskStatus = row.taskStatus,
+            reactions = row.reactions,
         )
     }
 
@@ -409,6 +413,7 @@ object WorkbookMapper {
                 row.updatedAtIso.orEmpty(),
                 row.deleted.toString(),
                 normalizeTaskStatus(row.taskStatus),
+                joinListCell(row.reactions.distinct()),
             )
         }
         return rows
@@ -446,6 +451,7 @@ object WorkbookMapper {
                 val updatedAtIso = row.cell("updated_at_iso", 10).trim().takeIf { it.isNotEmpty() }
                 val deleted = parseBooleanCell(row.cell("deleted", 11))
                 val taskStatus = normalizeTaskStatus(row.cell("task_status", 12))
+                val reactions = splitListCell(row.cell("reactions", 13)).distinct()
 
                 SheetEntryRow(
                     entryId = entryId,
@@ -461,6 +467,7 @@ object WorkbookMapper {
                     updatedAtIso = updatedAtIso,
                     deleted = deleted,
                     taskStatus = taskStatus,
+                    reactions = reactions,
                 )
             }
     }
@@ -609,6 +616,7 @@ object WorkbookMapper {
         bookmarkSignatures: Collection<String>,
         attachmentSha256s: Collection<String>,
         taskStatus: String = "NONE",
+        reactions: Collection<String> = emptyList(),
     ): String {
         val normalizedTask = normalizeTaskStatus(taskStatus)
         val canonical = buildString {
@@ -623,6 +631,10 @@ object WorkbookMapper {
             append("media=").append(attachmentSha256s.sorted().joinToString(","))
             if (normalizedTask != "NONE") {
                 append("\ntask=").append(normalizedTask)
+            }
+            val cleanedReactions = reactions.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+            if (cleanedReactions.isNotEmpty()) {
+                append("\nreactions=").append(cleanedReactions.joinToString(","))
             }
         }
         return ContentHasher.sha256Hex(canonical)

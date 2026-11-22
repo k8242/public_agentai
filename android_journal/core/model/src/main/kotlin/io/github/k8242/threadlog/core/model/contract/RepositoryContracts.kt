@@ -48,6 +48,11 @@ interface EntryRepository {
         taskStatus: TaskStatus,
         nowMs: Long = System.currentTimeMillis(),
     ) {}
+    suspend fun toggleReaction(
+        entryId: String,
+        emoji: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {}
     suspend fun softDeleteEntry(entryId: String, nowMs: Long = System.currentTimeMillis())
     suspend fun undoSoftDelete(entryId: String)
     fun observeCompactSummaries(): Flow<List<CompactEntrySummary>>

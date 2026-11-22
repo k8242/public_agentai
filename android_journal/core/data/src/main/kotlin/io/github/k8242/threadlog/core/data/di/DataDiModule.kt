@@ -91,7 +91,7 @@ abstract class DataDiModule {
                 name = ThreadLogDatabase.DATABASE_NAME,
             )
                 .setDriver(BundledSQLiteDriver())
-                .addMigrations(ThreadLogDatabase.MIGRATION_1_2)
+                .addMigrations(ThreadLogDatabase.MIGRATION_1_2, ThreadLogDatabase.MIGRATION_2_3)
                 .addCallback(ThreadLogDatabaseCallback())
                 .build()
 

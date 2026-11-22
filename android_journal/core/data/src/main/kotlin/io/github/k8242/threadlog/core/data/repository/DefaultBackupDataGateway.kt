@@ -252,6 +252,7 @@ class DefaultBackupDataGateway @Inject constructor(
             updatedAtMs = updatedAtMs,
             deletedAtMs = deletedAtMs,
             taskStatus = normalizedTaskStatus,
+            reactionsJson = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec.encode(row.reactions),
         )
         entryDao.upsert(placeholderEntity)
 

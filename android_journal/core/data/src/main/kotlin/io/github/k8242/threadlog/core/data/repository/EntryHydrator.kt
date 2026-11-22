@@ -11,6 +11,7 @@ import io.github.k8242.threadlog.core.data.local.entity.EntryEntity
 import io.github.k8242.threadlog.core.data.local.entity.TagEntity
 import io.github.k8242.threadlog.core.data.mapper.AliasesJsonCodec
 import io.github.k8242.threadlog.core.data.mapper.EntryContentHasher
+import io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec
 import io.github.k8242.threadlog.core.data.mapper.TagPathNormalizer
 import io.github.k8242.threadlog.core.data.mapper.toDomain
 import io.github.k8242.threadlog.core.model.EntryWithDetails
@@ -71,6 +72,21 @@ class EntryHydrator @Inject constructor(
             .flatMap { entryDao.getByIds(it) }
             .associateBy { it.id }
 
+        // Compute 0-based chronological per-day ordinals in batch for all dates present in this page.
+        val distinctDates = entities.map { it.localDate }.distinct()
+        val dailyOrdinalByEntryId = HashMap<String, Int>(entities.size)
+        if (distinctDates.isNotEmpty()) {
+            val activeRowsByDate = distinctDates
+                .chunked(SQLITE_BIND_CHUNK_SIZE)
+                .flatMap { entryDao.getActiveEntryIdsForDates(it) }
+                .groupBy { it.localDate }
+            for ((_, dayRows) in activeRowsByDate) {
+                dayRows.forEachIndexed { ordinal, row ->
+                    dailyOrdinalByEntryId[row.id] = ordinal
+                }
+            }
+        }
+
         return entities.map { entity ->
             val hydratedTags = entryTagsByEntryId[entity.id]
                 .orEmpty()
@@ -116,13 +132,15 @@ class EntryHydrator @Inject constructor(
                 bookmarks = hydratedBookmarks,
                 attachments = hydratedAttachments,
                 replyPreview = replyPreview,
+                dailyOrdinal = dailyOrdinalByEntryId[entity.id] ?: 0,
             )
         }
     }
 
     /**
      * Recomputes the canonical SHA-256 `contentHash` of [entryId] from its persisted state
-     * (body, reply target, tombstone flag, tags, bookmarks, attachments) and updates `entries`.
+     * (body, reply target, tombstone flag, tags, bookmarks, attachments, task status, reactions)
+     * and updates `entries`.
      */
     suspend fun recomputeAndPersistContentHash(entryId: String): EntryEntity? {
         val entry = entryDao.getById(entryId) ?: return null
@@ -154,6 +172,7 @@ class EntryHydrator @Inject constructor(
         val parsedTaskStatus = runCatching {
             io.github.k8242.threadlog.core.model.TaskStatus.valueOf(entry.taskStatus)
         }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE)
+        val reactions = ReactionsJsonCodec.decode(entry.reactionsJson)
 
         val updatedHash = EntryContentHasher.compute(
             bodyRaw = entry.bodyRaw,
@@ -165,6 +184,7 @@ class EntryHydrator @Inject constructor(
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
             taskStatus = parsedTaskStatus,
+            reactions = reactions,
         )
 
         if (updatedHash == entry.contentHash) return entry

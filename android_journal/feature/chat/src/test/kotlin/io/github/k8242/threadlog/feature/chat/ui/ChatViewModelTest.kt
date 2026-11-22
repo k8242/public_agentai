@@ -412,6 +412,30 @@ class ChatViewModelTest {
             .isEqualTo("e-1" to io.github.k8242.threadlog.core.model.TaskStatus.NONE)
     }
 
+    @Test
+    fun projectPlusTrigger_suggestsOnlyProjects_andInsertsPlusMention() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.onComposerTextChanged("Working on +jour", 16)
+        assertThat(vm.uiState.value.tagSuggestions.map { it.id }).containsExactly(journalProjectTag.id)
+
+        vm.onSelectTagSuggestion(journalProjectTag)
+        assertThat(vm.uiState.value.composerText).isEqualTo("Working on +journal-app ")
+        assertThat(vm.uiState.value.selectedTagIds).contains(journalProjectTag.id)
+    }
+
+    @Test
+    fun toggleReaction_delegatesToRepository() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.toggleReaction("e-1", "\uD83D\uDD25")
+        advanceUntilIdle()
+
+        assertThat(entryRepo.reactionToggles).containsExactly("e-1" to "\uD83D\uDD25")
+    }
+
     private data class CreatedCall(
         val createdId: String,
         val bodyRaw: String,
@@ -427,6 +451,7 @@ class ChatViewModelTest {
         val createdCalls = mutableListOf<CreatedCall>()
         val editedCalls = mutableListOf<Pair<String, String>>()
         val taskStatusUpdates = mutableListOf<Pair<String, io.github.k8242.threadlog.core.model.TaskStatus>>()
+        val reactionToggles = mutableListOf<Pair<String, String>>()
         val softDeletedIds = mutableListOf<String>()
         val restoredIds = mutableListOf<String>()
         val pendingAutoTagFlow = MutableStateFlow<List<EntryWithDetails>>(emptyList())
@@ -496,6 +521,14 @@ class ChatViewModelTest {
             nowMs: Long,
         ) {
             taskStatusUpdates += entryId to taskStatus
+        }
+
+        override suspend fun toggleReaction(
+            entryId: String,
+            emoji: String,
+            nowMs: Long,
+        ) {
+            reactionToggles += entryId to emoji
         }
 
         override suspend fun editEntry(

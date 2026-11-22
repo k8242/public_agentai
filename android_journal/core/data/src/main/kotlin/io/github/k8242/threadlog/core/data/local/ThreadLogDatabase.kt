@@ -36,7 +36,7 @@ import io.github.k8242.threadlog.core.data.local.entity.TagEntity
         AutoTagRuleEntity::class,
         SyncEntryHashEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class ThreadLogDatabase : RoomDatabase() {
@@ -66,6 +66,14 @@ abstract class ThreadLogDatabase : RoomDatabase() {
                 )
                 connection.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_entries_task_status ON entries (task_status)",
+                )
+            }
+        }
+
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE entries ADD COLUMN reactions_json TEXT NOT NULL DEFAULT '[]'",
                 )
             }
         }

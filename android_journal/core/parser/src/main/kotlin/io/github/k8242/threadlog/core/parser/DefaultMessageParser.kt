@@ -7,6 +7,7 @@ import io.github.k8242.threadlog.core.model.contract.MessageParser
 import io.github.k8242.threadlog.core.model.parser.ActiveTagTrigger
 import io.github.k8242.threadlog.core.model.parser.ExtractedUrl
 import io.github.k8242.threadlog.core.model.parser.InlineSpan
+import io.github.k8242.threadlog.core.model.parser.InlineTagToken
 import io.github.k8242.threadlog.core.model.parser.MessageBlock
 import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 import io.github.k8242.threadlog.core.model.parser.TagTriggerKind
@@ -16,8 +17,8 @@ import java.util.Locale
  * Deterministic, single-pass WhatsApp-style message parser and inline tag trigger detector.
  *
  * Supports fenced code blocks, quote blocks, paragraphs, inline code, URL extraction with
- * trailing punctuation / balanced-paren handling, and nested `*bold*`, `_italic_`, `~strike~`
- * formatting following WhatsApp boundary rules.
+ * trailing punctuation / balanced-paren handling, inline `@person` / `#topic` / `+project` tag
+ * extraction, and nested `*bold*`, `_italic_`, `~strike~` formatting following WhatsApp boundary rules.
  */
 class DefaultMessageParser : MessageParser {
 
@@ -27,6 +28,7 @@ class DefaultMessageParser : MessageParser {
                 blocks = emptyList(),
                 bodyPlain = "",
                 extractedUrls = emptyList(),
+                inlineTags = emptyList(),
             )
         }
 
@@ -114,10 +116,12 @@ class DefaultMessageParser : MessageParser {
         }
 
         val bodyPlain = buildBodyPlain(blocks)
+        val inlineTags = extractInlineTags(blocks)
         return ParsedMessage(
             blocks = blocks,
             bodyPlain = bodyPlain,
             extractedUrls = extractedUrls.values.toList(),
+            inlineTags = inlineTags,
         )
     }
 
@@ -129,12 +133,16 @@ class DefaultMessageParser : MessageParser {
         var idx = cursorPosition - 1
         while (idx >= 0) {
             val ch = text[idx]
-            if (ch == '@' || ch == '#') {
+            if (ch == '@' || ch == '#' || ch == '+') {
                 val isValidStart = idx == 0 || isTriggerPrecedingChar(text[idx - 1])
                 if (!isValidStart) {
                     return null
                 }
-                val kind = if (ch == '@') TagTriggerKind.PERSON_AT else TagTriggerKind.ALL_HASH
+                val kind = when (ch) {
+                    '@' -> TagTriggerKind.PERSON_AT
+                    '+' -> TagTriggerKind.PROJECT_PLUS
+                    else -> TagTriggerKind.ALL_HASH
+                }
                 val query = text.substring(idx + 1, cursorPosition)
                 return ActiveTagTrigger(
                     kind = kind,
@@ -431,6 +439,61 @@ class DefaultMessageParser : MessageParser {
         }
         appendAll(spans)
         return sb.toString()
+    }
+
+    private fun extractInlineTags(blocks: List<MessageBlock>): List<InlineTagToken> {
+        val seen = LinkedHashMap<String, InlineTagToken>()
+
+        fun scanText(text: String) {
+            var i = 0
+            while (i < text.length) {
+                val ch = text[i]
+                if ((ch == '@' || ch == '#' || ch == '+') &&
+                    (i == 0 || isTriggerPrecedingChar(text[i - 1]))
+                ) {
+                    var end = i + 1
+                    while (end < text.length && isValidTagQueryChar(text[end])) {
+                        end++
+                    }
+                    val raw = text.substring(i + 1, end).trimEnd('.', '/', '-', '_')
+                    if (raw.isNotEmpty() && raw.any { it.isLetterOrDigit() }) {
+                        val kind = when (ch) {
+                            '@' -> TagTriggerKind.PERSON_AT
+                            '+' -> TagTriggerKind.PROJECT_PLUS
+                            else -> TagTriggerKind.ALL_HASH
+                        }
+                        val dedupeKey = "${kind.name}:${raw.lowercase(Locale.ROOT)}"
+                        seen.putIfAbsent(dedupeKey, InlineTagToken(kind = kind, rawValue = raw))
+                    }
+                    i = end
+                    continue
+                }
+                i++
+            }
+        }
+
+        fun scanSpans(spans: List<InlineSpan>) {
+            for (span in spans) {
+                when (span) {
+                    is InlineSpan.Text -> scanText(span.text)
+                    is InlineSpan.Bold -> scanSpans(span.children)
+                    is InlineSpan.Italic -> scanSpans(span.children)
+                    is InlineSpan.Strike -> scanSpans(span.children)
+                    is InlineSpan.InlineCode -> Unit
+                    is InlineSpan.Url -> Unit
+                }
+            }
+        }
+
+        for (block in blocks) {
+            when (block) {
+                is MessageBlock.Paragraph -> scanSpans(block.spans)
+                is MessageBlock.QuoteBlock -> block.lines.forEach(::scanSpans)
+                is MessageBlock.CodeBlock -> Unit
+            }
+        }
+
+        return seen.values.toList()
     }
 
     private fun appendSpan(target: MutableList<InlineSpan>, span: InlineSpan) {

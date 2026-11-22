@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +31,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AddReaction
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
@@ -44,18 +49,20 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -73,11 +80,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
@@ -89,6 +98,7 @@ import io.github.k8242.threadlog.core.model.ReplyPreview
 import io.github.k8242.threadlog.core.model.parser.DateDividerMeta
 import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 import java.io.File
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -215,6 +225,7 @@ fun MessageBubbleItem(
     onManageTags: () -> Unit,
     onToggleTask: () -> Unit,
     onToggleTaskDone: () -> Unit,
+    onToggleReaction: (emoji: String) -> Unit,
     onDelete: () -> Unit,
     onToggleBookmarkCollapsed: (bookmarkId: String, currentlyCollapsed: Boolean) -> Unit,
     onPromoteAutoTag: (tagId: String) -> Unit,
@@ -231,10 +242,14 @@ fun MessageBubbleItem(
     var triggeredReplyOnDrag by remember(entryWithDetails.entry.id) { mutableStateOf(false) }
     val animatedOffsetPx by animateFloatAsState(targetValue = dragOffsetPx, label = "swipeReplyOffset")
     var menuExpanded by remember { mutableStateOf(false) }
+    var showReactionDialog by remember { mutableStateOf(false) }
 
     val entry = entryWithDetails.entry
     val isTask = entry.isTask
     val isTaskDone = entry.isTaskDone
+    val hexOrdinal = remember(entryWithDetails.dailyOrdinal) {
+        "0x${entryWithDetails.dailyOrdinal.toString(16).uppercase(Locale.ROOT)}"
+    }
 
     val bubbleContainerColor = when {
         isTask && !isTaskDone -> MaterialTheme.colorScheme.surfaceContainerLow
@@ -317,7 +332,7 @@ fun MessageBubbleItem(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // Header row: Reply preview / TODO badge (if any) + overflow action menu
+                    // Header row: Upper-left 0-based hex ordinal + timestamp (+ Edited + TODO badge) & overflow menu
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
@@ -326,27 +341,63 @@ fun MessageBubbleItem(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            if (isTask) {
-                                Surface(
-                                    color = if (isTaskDone) {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    } else {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable(onClick = onToggleTaskDone),
-                                ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = hexOrdinal,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = "\u00B7",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = dateMeta.timeLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (entry.isEdited) {
                                     Text(
-                                        text = if (isTaskDone) "DONE" else "TODO",
+                                        text = "\u00B7",
                                         style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (isTaskDone) {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        } else {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        },
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Text(
+                                        text = "Edited",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontStyle = FontStyle.Italic,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (isTask) {
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Surface(
+                                        color = if (isTaskDone) {
+                                            MaterialTheme.colorScheme.surfaceContainerHigh
+                                        } else {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.clickable(onClick = onToggleTaskDone),
+                                    ) {
+                                        Text(
+                                            text = if (isTaskDone) "DONE" else "TODO",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isTaskDone) {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            } else {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            },
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                        )
+                                    }
                                 }
                             }
                             entryWithDetails.replyPreview?.let { preview ->
@@ -370,6 +421,66 @@ fun MessageBubbleItem(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
+                                // WhatsApp-style quick emoji reaction strip at the top of the action menu
+                                Row(
+                                    modifier = Modifier
+                                        .widthIn(max = 264.dp)
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    QUICK_REACTION_EMOJIS.forEach { emoji ->
+                                        val isActive = emoji in entry.reactions
+                                        Surface(
+                                            color = if (isActive) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clickable {
+                                                    menuExpanded = false
+                                                    onToggleReaction(emoji)
+                                                },
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(text = emoji, fontSize = 18.sp)
+                                            }
+                                        }
+                                    }
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        shape = CircleShape,
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clickable {
+                                                menuExpanded = false
+                                                showReactionDialog = true
+                                            },
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Add,
+                                                contentDescription = "More emoji reactions",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                                DropdownMenuItem(
+                                    text = { Text("React") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.AddReaction, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        showReactionDialog = true
+                                    },
+                                )
                                 DropdownMenuItem(
                                     text = { Text(if (isTask) "Remove TODO" else "Mark as TODO") },
                                     leadingIcon = {
@@ -418,7 +529,7 @@ fun MessageBubbleItem(
                                 DropdownMenuItem(
                                     text = { Text("Tags") },
                                     leadingIcon = {
-                                        Icon(Icons.Outlined.Label, contentDescription = null)
+                                        Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null)
                                     },
                                     onClick = {
                                         menuExpanded = false
@@ -458,11 +569,7 @@ fun MessageBubbleItem(
                                             Icons.Outlined.CheckBoxOutlineBlank
                                         },
                                         contentDescription = if (isTaskDone) "Reopen TODO" else "Complete TODO",
-                                        tint = if (isTaskDone) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.primary
-                                        },
+                                        tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(20.dp),
                                     )
                                 }
@@ -540,35 +647,153 @@ fun MessageBubbleItem(
                         }
                     }
 
-                    // Footer: write-time timestamp + optional Edited badge
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (entry.isEdited) {
-                            Text(
-                                text = "Edited",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontStyle = FontStyle.Italic,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = " \u00B7 ",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    // Emoji reaction chips (tap any chip to remove; '+' opens picker)
+                    if (entry.reactions.isNotEmpty()) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            entry.reactions.forEach { emoji ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(
+                                        width = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                    ),
+                                    modifier = Modifier.clickable { onToggleReaction(emoji) },
+                                ) {
+                                    Text(
+                                        text = emoji,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(
+                                    width = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                ),
+                                modifier = Modifier.clickable { showReactionDialog = true },
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = "Add emoji reaction",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
                         }
-                        Text(
-                            text = dateMeta.timeLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
         }
     }
+
+    if (showReactionDialog) {
+        EmojiReactionPickerDialog(
+            activeReactions = entry.reactions,
+            onToggleEmoji = { emoji ->
+                onToggleReaction(emoji)
+                showReactionDialog = false
+            },
+            onDismiss = { showReactionDialog = false },
+        )
+    }
+}
+
+private val QUICK_REACTION_EMOJIS: List<String> = listOf(
+    "\uD83D\uDC4D", // 👍
+    "\u2764\uFE0F", // ❤️
+    "\uD83D\uDE02", // 😂
+    "\uD83D\uDE2E", // 😮
+    "\uD83D\uDE22", // 😢
+    "\uD83D\uDE4F", // 🙏
+    "\uD83D\uDD25", // 🔥
+    "\u2B50",       // ⭐
+    "\u2705",       // ✅
+    "\uD83C\uDFAF", // 🎯
+    "\uD83D\uDCA1", // 💡
+    "\uD83D\uDCCC", // 📌
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EmojiReactionPickerDialog(
+    activeReactions: List<String>,
+    onToggleEmoji: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var customEmoji by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add reaction") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    QUICK_REACTION_EMOJIS.forEach { emoji ->
+                        val isActive = emoji in activeReactions
+                        Surface(
+                            color = if (isActive) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { onToggleEmoji(emoji) },
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(text = emoji, fontSize = 20.sp)
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = customEmoji,
+                    onValueChange = { next ->
+                        if (next.length <= 16) {
+                            customEmoji = next
+                        }
+                    },
+                    label = { Text("Or type any emoji") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmed = customEmoji.trim()
+                    if (trimmed.isNotEmpty()) {
+                        onToggleEmoji(trimmed)
+                    }
+                },
+                enabled = customEmoji.isNotBlank(),
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 data class TagChipTarget(

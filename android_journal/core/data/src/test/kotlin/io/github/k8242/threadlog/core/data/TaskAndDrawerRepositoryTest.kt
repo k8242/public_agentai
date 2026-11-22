@@ -164,8 +164,77 @@ class TaskAndDrawerRepositoryTest {
                 assertThat(stmt.step()).isTrue()
                 assertThat(stmt.getText(0)).isEqualTo("NONE")
             }
+
+            io.github.k8242.threadlog.core.data.local.ThreadLogDatabase.MIGRATION_2_3.migrate(conn)
+
+            conn.prepare("SELECT reactions_json FROM entries WHERE id = 'e-legacy'").use { stmt ->
+                assertThat(stmt.step()).isTrue()
+                assertThat(stmt.getText(0)).isEqualTo("[]")
+            }
         } finally {
             conn.close()
         }
+    }
+
+    @Test
+    fun toggleReaction_addsRemovesAndUpdatesContentHash() = runTest {
+        val created = graph.entryRepository.createEntry(
+            bodyRaw = "Celebration note",
+            userTagIds = emptyList(),
+            nowMs = 1_763_600_000_000L,
+            zoneId = "UTC",
+        )
+        assertThat(created.entry.reactions).isEmpty()
+        val initialHash = created.entry.contentHash
+
+        graph.entryRepository.toggleReaction(created.entry.id, "\uD83D\uDD25", nowMs = 1_763_600_100_000L)
+        graph.entryRepository.toggleReaction(created.entry.id, "\uD83D\uDC4D", nowMs = 1_763_600_200_000L)
+        val afterAdd = graph.entryRepository.getEntry(created.entry.id)!!
+        assertThat(afterAdd.entry.reactions).containsExactly("\uD83D\uDD25", "\uD83D\uDC4D").inOrder()
+        assertThat(afterAdd.entry.contentHash).isNotEqualTo(initialHash)
+
+        // Toggling an existing reaction removes it.
+        graph.entryRepository.toggleReaction(created.entry.id, "\uD83D\uDD25", nowMs = 1_763_600_300_000L)
+        val afterRemove = graph.entryRepository.getEntry(created.entry.id)!!
+        assertThat(afterRemove.entry.reactions).containsExactly("\uD83D\uDC4D")
+    }
+
+    @Test
+    fun dailyOrdinal_isZeroBasedPerDay_andResetsNextDay() = runTest {
+        // Day 1: 2026-11-20 UTC (3 notes)
+        val day1Base = 1_795_132_800_000L // 2026-11-20T00:00:00Z
+        val n0 = graph.entryRepository.createEntry("First", emptyList(), nowMs = day1Base + 1_000L, zoneId = "UTC")
+        val n1 = graph.entryRepository.createEntry("Second", emptyList(), nowMs = day1Base + 2_000L, zoneId = "UTC")
+        val n2 = graph.entryRepository.createEntry("Third", emptyList(), nowMs = day1Base + 3_000L, zoneId = "UTC")
+
+        // Day 2: 2026-11-21 UTC (2 notes)
+        val day2Base = day1Base + 86_400_000L
+        val m0 = graph.entryRepository.createEntry("Next day first", emptyList(), nowMs = day2Base + 1_000L, zoneId = "UTC")
+        val m1 = graph.entryRepository.createEntry("Next day second", emptyList(), nowMs = day2Base + 2_000L, zoneId = "UTC")
+
+        val snapshot = graph.entryRepository.observePagedEntries(ChatFeedFilter.All).asSnapshot()
+        val byId = snapshot.associateBy { it.entry.id }
+        assertThat(byId[n0.entry.id]!!.dailyOrdinal).isEqualTo(0)
+        assertThat(byId[n1.entry.id]!!.dailyOrdinal).isEqualTo(1)
+        assertThat(byId[n2.entry.id]!!.dailyOrdinal).isEqualTo(2)
+        assertThat(byId[m0.entry.id]!!.dailyOrdinal).isEqualTo(0)
+        assertThat(byId[m1.entry.id]!!.dailyOrdinal).isEqualTo(1)
+    }
+
+    @Test
+    fun createEntry_autoResolvesInlineProjectPersonAndTopicTags() = runTest {
+        val created = graph.entryRepository.createEntry(
+            bodyRaw = "Synced with @Lex on +journal-app about #ideas",
+            userTagIds = emptyList(),
+            nowMs = 1_763_600_000_000L,
+            zoneId = "UTC",
+        )
+
+        val visiblePaths = created.visibleTags.map { it.tag.fullPath }
+        assertThat(visiblePaths).containsExactly(
+            "people/Lex",
+            "projects/journal-app",
+            "topics/ideas",
+        )
     }
 }

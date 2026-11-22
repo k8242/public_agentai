@@ -250,7 +250,22 @@ interface EntryDao {
         """,
     )
     suspend fun getEntriesWithPendingAutoTags(): List<EntryEntity>
+    @Query(
+        """
+        SELECT id, local_date AS localDate
+        FROM entries
+        WHERE deleted_at_ms IS NULL
+          AND local_date IN (:localDates)
+        ORDER BY local_date ASC, created_at_ms ASC, id ASC
+        """,
+    )
+    suspend fun getActiveEntryIdsForDates(localDates: List<String>): List<DailyEntryIdProjection>
 }
+
+data class DailyEntryIdProjection(
+    val id: String,
+    val localDate: String,
+)
 
 data class DrawerOverviewProjection(
     val totalEntryCount: Int,
