@@ -7,6 +7,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.deferredTransaction
 import androidx.room.immediateTransaction
+import androidx.room.migration.Migration
 import androidx.room.useReaderConnection
 import androidx.room.useWriterConnection
 import androidx.sqlite.SQLiteConnection
@@ -35,7 +36,7 @@ import io.github.k8242.threadlog.core.data.local.entity.TagEntity
         AutoTagRuleEntity::class,
         SyncEntryHashEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class ThreadLogDatabase : RoomDatabase() {
@@ -57,6 +58,17 @@ abstract class ThreadLogDatabase : RoomDatabase() {
                 "hidden_tags, " +
                 "tokenize='unicode61'" +
                 ")"
+
+        val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE entries ADD COLUMN task_status TEXT NOT NULL DEFAULT 'NONE'",
+                )
+                connection.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_entries_task_status ON entries (task_status)",
+                )
+            }
+        }
     }
 }
 

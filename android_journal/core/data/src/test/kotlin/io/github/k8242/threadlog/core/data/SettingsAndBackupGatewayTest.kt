@@ -81,6 +81,14 @@ class SettingsAndBackupGatewayTest {
             repo1.setScheduledBackupCadence(BackupCadence.DAILY)
             assertThat(awaitItem().scheduledBackupCadence).isEqualTo(BackupCadence.DAILY)
 
+            repo1.setColorScheme(io.github.k8242.threadlog.core.model.AppColorScheme.WHATSAPP)
+            assertThat(awaitItem().colorScheme)
+                .isEqualTo(io.github.k8242.threadlog.core.model.AppColorScheme.WHATSAPP)
+
+            repo1.setThemeMode(io.github.k8242.threadlog.core.model.ThemeMode.DARK)
+            assertThat(awaitItem().themeMode)
+                .isEqualTo(io.github.k8242.threadlog.core.model.ThemeMode.DARK)
+
             repo1.updateSyncLinks(
                 spreadsheetId = "sheet-123",
                 mediaFolderId = "folder-456",
@@ -94,10 +102,14 @@ class SettingsAndBackupGatewayTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        // Re-verify persisted deviceId stays identical on subsequent reads.
+        // Re-verify persisted deviceId and theme prefs stay identical on subsequent reads.
         val secondRead = repo1.getSettings()
         assertThat(secondRead.deviceId).isEqualTo(initial.deviceId)
         assertThat(secondRead.linkedSpreadsheetId).isEqualTo("sheet-123")
+        assertThat(secondRead.colorScheme)
+            .isEqualTo(io.github.k8242.threadlog.core.model.AppColorScheme.WHATSAPP)
+        assertThat(secondRead.themeMode)
+            .isEqualTo(io.github.k8242.threadlog.core.model.ThemeMode.DARK)
 
         // Clearing nullable sync links persists nulls properly.
         repo1.updateSyncLinks(spreadsheetId = null, mediaFolderId = null, lastExportIso = null)

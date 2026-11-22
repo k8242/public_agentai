@@ -69,6 +69,71 @@ interface EntryDao {
 
     @Query(
         """
+        SELECT * FROM entries
+        WHERE deleted_at_ms IS NULL
+          AND task_status IN (:statuses)
+        ORDER BY created_at_ms DESC, id DESC
+        """,
+    )
+    fun pagingSourceByTaskStatuses(statuses: List<String>): PagingSource<Int, EntryEntity>
+
+    @Query(
+        """
+        SELECT e.* FROM entries e
+        WHERE e.deleted_at_ms IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          )
+        ORDER BY e.created_at_ms DESC, e.id DESC
+        """,
+    )
+    fun pagingSourceByTagPrefix(
+        exactTagPath: String,
+        subtreeLikePattern: String,
+    ): PagingSource<Int, EntryEntity>
+
+    @Query(
+        """
+        SELECT
+            COUNT(*) AS totalEntryCount,
+            (SELECT substr(body_plain, 1, 100) FROM entries WHERE deleted_at_ms IS NULL ORDER BY created_at_ms DESC, id DESC LIMIT 1) AS latestEntryPreview,
+            SUM(CASE WHEN task_status = 'TODO' THEN 1 ELSE 0 END) AS openTodoCount,
+            SUM(CASE WHEN task_status = 'DONE' THEN 1 ELSE 0 END) AS completedTodoCount,
+            (SELECT substr(body_plain, 1, 100) FROM entries WHERE deleted_at_ms IS NULL AND task_status = 'TODO' ORDER BY created_at_ms DESC, id DESC LIMIT 1) AS latestOpenTodoPreview
+        FROM entries
+        WHERE deleted_at_ms IS NULL
+        """,
+    )
+    suspend fun getDrawerOverview(): DrawerOverviewProjection
+
+    @Query(
+        """
+        SELECT
+            e.id AS entryId,
+            e.created_at_ms AS createdAtMs,
+            substr(e.body_plain, 1, 100) AS preview,
+            e.task_status AS taskStatus,
+            t.full_path AS tagFullPath
+        FROM entry_tags et
+        INNER JOIN entries e ON e.id = et.entry_id
+        INNER JOIN tags t ON t.id = et.tag_id
+        WHERE e.deleted_at_ms IS NULL
+          AND et.state IN ('USER', 'AUTO_PROMOTED')
+        ORDER BY e.created_at_ms DESC, e.id DESC
+        """,
+    )
+    suspend fun getActiveVisibleEntryTagLinks(): List<ActiveVisibleEntryTagLinkProjection>
+
+    @Query(
+        """
         SELECT
             e.id AS id,
             e.created_at_ms AS createdAtMs,
@@ -186,3 +251,19 @@ interface EntryDao {
     )
     suspend fun getEntriesWithPendingAutoTags(): List<EntryEntity>
 }
+
+data class DrawerOverviewProjection(
+    val totalEntryCount: Int,
+    val latestEntryPreview: String?,
+    val openTodoCount: Int?,
+    val completedTodoCount: Int?,
+    val latestOpenTodoPreview: String?,
+)
+
+data class ActiveVisibleEntryTagLinkProjection(
+    val entryId: String,
+    val createdAtMs: Long,
+    val preview: String,
+    val taskStatus: String,
+    val tagFullPath: String,
+)

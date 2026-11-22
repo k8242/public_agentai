@@ -51,6 +51,7 @@ import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 @Composable
 fun FormattedMessageBody(
     parsedMessage: ParsedMessage,
+    isCompletedTask: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     if (parsedMessage.blocks.isEmpty()) return
@@ -62,6 +63,16 @@ fun FormattedMessageBody(
     val quoteAccent = MaterialTheme.colorScheme.primary
     val quoteBg = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f)
     val quoteTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val paragraphColor = if (isCompletedTask) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val paragraphStyle = if (isCompletedTask) {
+        MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough)
+    } else {
+        MaterialTheme.typography.bodyMedium
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -81,8 +92,8 @@ fun FormattedMessageBody(
                     }
                     Text(
                         text = annotated,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        style = paragraphStyle,
+                        color = paragraphColor,
                     )
                 }
 

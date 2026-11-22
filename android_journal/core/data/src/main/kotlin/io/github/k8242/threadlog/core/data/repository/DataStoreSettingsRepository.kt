@@ -8,7 +8,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.k8242.threadlog.core.model.AppColorScheme
 import io.github.k8242.threadlog.core.model.BackupCadence
+import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
 import io.github.k8242.threadlog.core.model.contract.SettingsRepository
@@ -60,6 +62,18 @@ class DataStoreSettingsRepository @Inject constructor(
         }
     }
 
+    override suspend fun setColorScheme(colorScheme: AppColorScheme) {
+        dataStore.edit { prefs ->
+            prefs[KEY_COLOR_SCHEME] = colorScheme.name
+        }
+    }
+
+    override suspend fun setThemeMode(themeMode: ThemeMode) {
+        dataStore.edit { prefs ->
+            prefs[KEY_THEME_MODE] = themeMode.name
+        }
+    }
+
     override suspend fun updateSyncLinks(
         spreadsheetId: String?,
         mediaFolderId: String?,
@@ -103,6 +117,12 @@ class DataStoreSettingsRepository @Inject constructor(
         val cadence = this[KEY_SCHEDULED_BACKUP_CADENCE]
             ?.let { raw -> runCatching { BackupCadence.valueOf(raw) }.getOrNull() }
             ?: BackupCadence.OFF
+        val colorScheme = this[KEY_COLOR_SCHEME]
+            ?.let { raw -> runCatching { AppColorScheme.valueOf(raw) }.getOrNull() }
+            ?: AppColorScheme.TEAL
+        val themeMode = this[KEY_THEME_MODE]
+            ?.let { raw -> runCatching { ThemeMode.valueOf(raw) }.getOrNull() }
+            ?: ThemeMode.SYSTEM
 
         return UserSettings(
             weekStart = weekStart,
@@ -113,6 +133,8 @@ class DataStoreSettingsRepository @Inject constructor(
             linkedMediaFolderId = this[KEY_LINKED_MEDIA_FOLDER_ID],
             lastExportIso = this[KEY_LAST_EXPORT_ISO],
             deviceId = this[KEY_DEVICE_ID].orEmpty(),
+            colorScheme = colorScheme,
+            themeMode = themeMode,
         )
     }
 
@@ -127,5 +149,7 @@ class DataStoreSettingsRepository @Inject constructor(
         private val KEY_LINKED_MEDIA_FOLDER_ID = stringPreferencesKey("linked_media_folder_id")
         private val KEY_LAST_EXPORT_ISO = stringPreferencesKey("last_export_iso")
         private val KEY_DEVICE_ID = stringPreferencesKey("device_id")
+        private val KEY_COLOR_SCHEME = stringPreferencesKey("color_scheme")
+        private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     }
 }

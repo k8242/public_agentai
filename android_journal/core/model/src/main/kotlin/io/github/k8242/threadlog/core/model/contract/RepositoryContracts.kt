@@ -4,20 +4,29 @@
 package io.github.k8242.threadlog.core.model.contract
 
 import androidx.paging.PagingData
+import io.github.k8242.threadlog.core.model.AppColorScheme
 import io.github.k8242.threadlog.core.model.AutoTagRule
 import io.github.k8242.threadlog.core.model.BackupCadence
 import io.github.k8242.threadlog.core.model.Bookmark
 import io.github.k8242.threadlog.core.model.CalendarDayCount
+import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.CompactEntrySummary
+import io.github.k8242.threadlog.core.model.DrawerOverviewSummary
+import io.github.k8242.threadlog.core.model.DrawerTagSummary
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.HybridSearchResult
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TaskStatus
+import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 interface EntryRepository {
     fun observePagedEntries(): Flow<PagingData<EntryWithDetails>>
+    fun observePagedEntries(filter: ChatFeedFilter): Flow<PagingData<EntryWithDetails>> =
+        observePagedEntries()
     fun observeEntry(entryId: String): Flow<EntryWithDetails?>
     suspend fun getEntry(entryId: String): EntryWithDetails?
     suspend fun createEntry(
@@ -27,12 +36,18 @@ interface EntryRepository {
         pendingAttachments: List<PendingAttachment> = emptyList(),
         nowMs: Long = System.currentTimeMillis(),
         zoneId: String? = null,
+        taskStatus: TaskStatus = TaskStatus.NONE,
     ): EntryWithDetails
     suspend fun editEntry(
         entryId: String,
         newBodyRaw: String,
         nowMs: Long = System.currentTimeMillis(),
     ): EntryWithDetails
+    suspend fun setTaskStatus(
+        entryId: String,
+        taskStatus: TaskStatus,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {}
     suspend fun softDeleteEntry(entryId: String, nowMs: Long = System.currentTimeMillis())
     suspend fun undoSoftDelete(entryId: String)
     fun observeCompactSummaries(): Flow<List<CompactEntrySummary>>
@@ -40,6 +55,8 @@ interface EntryRepository {
     fun observeEntriesForDate(localDate: String, filterTagPathPrefix: String? = null): Flow<List<EntryWithDetails>>
     fun observeContextWindow(startMs: Long, endMs: Long): Flow<List<EntryWithDetails>>
     fun observeEntriesWithPendingAutoTags(): Flow<List<EntryWithDetails>>
+    fun observeDrawerOverview(): Flow<DrawerOverviewSummary> = flowOf(DrawerOverviewSummary())
+    fun observeDrawerTagSummaries(): Flow<List<DrawerTagSummary>> = flowOf(emptyList())
 }
 
 interface TagRepository {
@@ -84,4 +101,6 @@ interface SettingsRepository {
     suspend fun setShowHiddenAutoTagsInChat(show: Boolean)
     suspend fun setScheduledBackupCadence(cadence: BackupCadence)
     suspend fun updateSyncLinks(spreadsheetId: String?, mediaFolderId: String?, lastExportIso: String?)
+    suspend fun setColorScheme(colorScheme: AppColorScheme) {}
+    suspend fun setThemeMode(themeMode: ThemeMode) {}
 }

@@ -362,6 +362,31 @@ class BackupCodecsTest {
         )
     }
 
+    @Test
+    fun csvCodec_roundTripsTaskStatus_andDefaultsMissingLegacyColumnToNone() {
+        val original = sampleWorkbook()
+        val withTodo = original.copy(
+            entries = original.entries.mapIndexed { idx, row ->
+                if (idx == 0) row.copy(taskStatus = "TODO") else row.copy(taskStatus = "DONE")
+            },
+        )
+        val out = ByteArrayOutputStream()
+        csvCodec.write(withTodo, out)
+        val imported = csvCodec.read(ByteArrayInputStream(out.toByteArray()))
+        assertThat(imported.entries[0].taskStatus).isEqualTo("TODO")
+        if (imported.entries.size > 1) {
+            assertThat(imported.entries[1].taskStatus).isEqualTo("DONE")
+        }
+
+        val legacyCsv = """
+            entry_id,created_at_iso,zone_id,body_raw,visible_tags,hidden_auto_tags,rejected_tags,bookmarks_pipe,media_drive_ids,reply_to_id,updated_at_iso,deleted
+            e-legacy,2026-11-20T12:00:00Z,UTC,Legacy note,,,,, , , ,false
+        """.trimIndent()
+        val legacyImported = csvCodec.read(ByteArrayInputStream(legacyCsv.toByteArray()))
+        assertThat(legacyImported.entries).hasSize(1)
+        assertThat(legacyImported.entries[0].taskStatus).isEqualTo("NONE")
+    }
+
     private class InMemoryMediaStorage : MediaStorage {
         private val files = LinkedHashMap<String, ByteArray>()
         private val shaToPath = LinkedHashMap<String, String>()

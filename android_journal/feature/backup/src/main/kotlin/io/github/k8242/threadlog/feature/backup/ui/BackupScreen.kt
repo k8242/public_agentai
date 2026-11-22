@@ -29,18 +29,23 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +68,7 @@ import io.github.k8242.threadlog.core.model.contract.GoogleAuthState
 
 @Composable
 fun BackupScreen(
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: BackupViewModel = hiltViewModel(),
 ) {
@@ -134,10 +140,12 @@ fun BackupScreen(
         onConfirmApplyRestore = viewModel::confirmApplyRestore,
         onDismissDiffPreview = viewModel::dismissDiffPreview,
         onClearMessages = viewModel::clearMessages,
+        onOpenDrawer = onOpenDrawer,
         modifier = modifier,
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupScreen(
     uiState: BackupUiState,
@@ -151,23 +159,35 @@ fun BackupScreen(
     onConfirmApplyRestore: () -> Unit,
     onDismissDiffPreview: () -> Unit,
     onClearMessages: () -> Unit,
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            text = "Backup & Restore",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-
-        if (uiState.isBusy) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Backup & Restore") },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Outlined.Menu,
+                            contentDescription = "Open navigation panel",
+                        )
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (uiState.isBusy) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
         uiState.errorMessage?.let { error ->
@@ -205,13 +225,14 @@ fun BackupScreen(
             onImportFormat = onImportFormat,
         )
 
-        CloudSyncCard(
-            uiState = uiState,
-            onPushCloudBackup = onPushCloudBackup,
-            onPullCloudPreview = onPullCloudPreview,
-            onUpdateCadence = onUpdateCadence,
-            onSignOut = onSignOut,
-        )
+            CloudSyncCard(
+                uiState = uiState,
+                onPushCloudBackup = onPushCloudBackup,
+                onPullCloudPreview = onPullCloudPreview,
+                onUpdateCadence = onUpdateCadence,
+                onSignOut = onSignOut,
+            )
+        }
     }
 }
 

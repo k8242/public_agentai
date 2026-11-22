@@ -151,6 +151,10 @@ class EntryHydrator @Inject constructor(
         val bookmarkSignatures = bookmarks.map { "${it.urlRaw}|${it.title.orEmpty()}" }
         val attachmentSha256s = attachmentDao.getForEntry(entryId).map { it.sha256 }
 
+        val parsedTaskStatus = runCatching {
+            io.github.k8242.threadlog.core.model.TaskStatus.valueOf(entry.taskStatus)
+        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE)
+
         val updatedHash = EntryContentHasher.compute(
             bodyRaw = entry.bodyRaw,
             replyToId = entry.replyToId,
@@ -160,6 +164,7 @@ class EntryHydrator @Inject constructor(
             rejectedTagPaths = rejectedPaths,
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
+            taskStatus = parsedTaskStatus,
         )
 
         if (updatedHash == entry.contentHash) return entry

@@ -16,6 +16,7 @@ import androidx.room.PrimaryKey
         Index(value = ["local_date"]),
         Index(value = ["iso_week"]),
         Index(value = ["deleted_at_ms"]),
+        Index(value = ["task_status"]),
     ],
 )
 data class EntryEntity(
@@ -42,6 +43,8 @@ data class EntryEntity(
     val updatedAtMs: Long? = null,
     @ColumnInfo(name = "deleted_at_ms")
     val deletedAtMs: Long? = null,
+    @ColumnInfo(name = "task_status", defaultValue = "NONE")
+    val taskStatus: String = "NONE",
 )
 
 @Entity(

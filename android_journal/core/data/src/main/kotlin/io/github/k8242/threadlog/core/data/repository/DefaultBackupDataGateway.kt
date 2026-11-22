@@ -234,6 +234,10 @@ class DefaultBackupDataGateway @Inject constructor(
             ?.let { parseIsoToEpochMs(it, resolvedZone, nowMs) }
         val deletedAtMs = if (row.deleted) (updatedAtMs ?: nowMs) else null
 
+        val normalizedTaskStatus = runCatching {
+            io.github.k8242.threadlog.core.model.TaskStatus.valueOf(row.taskStatus.trim().uppercase(Locale.ROOT)).name
+        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE.name)
+
         // Insert or update entry first so foreign keys on entry_tags / bookmarks / attachments succeed.
         val placeholderEntity = EntryEntity(
             id = targetEntryId,
@@ -247,6 +251,7 @@ class DefaultBackupDataGateway @Inject constructor(
             contentHash = "",
             updatedAtMs = updatedAtMs,
             deletedAtMs = deletedAtMs,
+            taskStatus = normalizedTaskStatus,
         )
         entryDao.upsert(placeholderEntity)
 

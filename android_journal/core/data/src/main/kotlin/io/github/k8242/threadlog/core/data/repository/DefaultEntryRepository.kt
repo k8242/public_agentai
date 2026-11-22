@@ -23,15 +23,21 @@ import io.github.k8242.threadlog.core.data.mapper.EntryContentHasher
 import io.github.k8242.threadlog.core.data.mapper.TagPathNormalizer
 import io.github.k8242.threadlog.core.data.mapper.toDomain
 import io.github.k8242.threadlog.core.model.CalendarDayCount
+import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.CompactEntrySummary
+import io.github.k8242.threadlog.core.model.DrawerOverviewSummary
+import io.github.k8242.threadlog.core.model.DrawerTagSummary
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskStatus
+import io.github.k8242.threadlog.core.model.TodoFilterMode
 import io.github.k8242.threadlog.core.model.contract.DateWeekCalculator
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
 import io.github.k8242.threadlog.core.model.contract.MessageParser
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
 import io.github.k8242.threadlog.core.parser.UuidV7
 import java.time.ZoneId
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,12 +61,41 @@ class DefaultEntryRepository @Inject constructor(
 ) : EntryRepository {
 
     override fun observePagedEntries(): Flow<PagingData<EntryWithDetails>> =
+        observePagedEntries(ChatFeedFilter.All)
+
+    override fun observePagedEntries(filter: ChatFeedFilter): Flow<PagingData<EntryWithDetails>> =
         Pager(
             config = PagingConfig(
                 pageSize = DEFAULT_PAGE_SIZE,
                 enablePlaceholders = false,
             ),
-            pagingSourceFactory = { entryDao.pagingSource() },
+            pagingSourceFactory = {
+                when (filter) {
+                    ChatFeedFilter.All -> entryDao.pagingSource()
+
+                    is ChatFeedFilter.Todos -> {
+                        val statuses = when (filter.mode) {
+                            TodoFilterMode.OPEN -> listOf(TaskStatus.TODO.name)
+                            TodoFilterMode.DONE -> listOf(TaskStatus.DONE.name)
+                            TodoFilterMode.ALL -> listOf(TaskStatus.TODO.name, TaskStatus.DONE.name)
+                        }
+                        entryDao.pagingSourceByTaskStatuses(statuses)
+                    }
+
+                    is ChatFeedFilter.TagSubtree -> {
+                        val normalized = TagPathNormalizer.normalize(filter.fullPath)
+                        if (normalized.isEmpty()) {
+                            entryDao.pagingSource()
+                        } else {
+                            val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
+                            entryDao.pagingSourceByTagPrefix(
+                                exactTagPath = normalized,
+                                subtreeLikePattern = subtreeLike,
+                            )
+                        }
+                    }
+                }
+            },
         ).flow.map { pagingData ->
             pagingData.map { entity ->
                 hydrator.hydrateEntry(entity)
@@ -88,6 +123,7 @@ class DefaultEntryRepository @Inject constructor(
         pendingAttachments: List<PendingAttachment>,
         nowMs: Long,
         zoneId: String?,
+        taskStatus: TaskStatus,
     ): EntryWithDetails {
         val resolvedZoneId = zoneId?.takeIf { it.isNotBlank() } ?: ZoneId.systemDefault().id
         val (localDate, isoWeek) = dateWeekCalculator.localDateAndIsoWeek(nowMs, resolvedZoneId)
@@ -147,6 +183,7 @@ class DefaultEntryRepository @Inject constructor(
                 rejectedTagPaths = emptyList(),
                 bookmarkSignatures = bookmarks.map { "${it.urlRaw}|${it.title.orEmpty()}" },
                 attachmentSha256s = attachments.map { it.sha256 },
+                taskStatus = taskStatus,
             )
 
             val entity = EntryEntity(
@@ -161,6 +198,7 @@ class DefaultEntryRepository @Inject constructor(
                 contentHash = contentHash,
                 updatedAtMs = null,
                 deletedAtMs = null,
+                taskStatus = taskStatus.name,
             )
 
             entryDao.upsert(entity)
@@ -221,7 +259,7 @@ class DefaultEntryRepository @Inject constructor(
                 bookmarkDao.upsertAll(newBookmarks)
             }
 
-            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs.
+            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs, taskStatus.
             val updatedEntity = existing.copy(
                 bodyRaw = newBodyRaw,
                 bodyPlain = parsed.bodyPlain,
@@ -234,6 +272,25 @@ class DefaultEntryRepository @Inject constructor(
 
             hydrator.hydrateEntry(hashedEntity)
         }
+
+    override suspend fun setTaskStatus(
+        entryId: String,
+        taskStatus: TaskStatus,
+        nowMs: Long,
+    ) {
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            if (existing.taskStatus == taskStatus.name) return@inWriteTransaction
+            val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
+            entryDao.update(
+                existing.copy(
+                    taskStatus = taskStatus.name,
+                    updatedAtMs = updatedAtMs,
+                ),
+            )
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
 
     override suspend fun softDeleteEntry(entryId: String, nowMs: Long) {
         database.inWriteTransaction {
@@ -325,6 +382,87 @@ class DefaultEntryRepository @Inject constructor(
                 database.inReadTransaction {
                     val entries = entryDao.getEntriesWithPendingAutoTags()
                     hydrator.hydrateEntries(entries)
+                }
+            }
+            .distinctUntilChanged()
+
+    override fun observeDrawerOverview(): Flow<DrawerOverviewSummary> =
+        database.invalidationTracker.createFlow("entries", emitInitialState = true)
+            .mapLatest {
+                database.inReadTransaction {
+                    val projection = entryDao.getDrawerOverview()
+                    DrawerOverviewSummary(
+                        totalEntryCount = projection.totalEntryCount,
+                        latestEntryPreview = projection.latestEntryPreview?.trim()?.takeIf { it.isNotEmpty() },
+                        openTodoCount = projection.openTodoCount ?: 0,
+                        completedTodoCount = projection.completedTodoCount ?: 0,
+                        latestOpenTodoPreview = projection.latestOpenTodoPreview?.trim()?.takeIf { it.isNotEmpty() },
+                    )
+                }
+            }
+            .distinctUntilChanged()
+
+    override fun observeDrawerTagSummaries(): Flow<List<DrawerTagSummary>> =
+        database.invalidationTracker.createFlow(
+            "entries",
+            "tags",
+            "entry_tags",
+            emitInitialState = true,
+        )
+            .mapLatest {
+                database.inReadTransaction {
+                    val allTags = tagDao.getAll().map { it.toDomain() }
+                    if (allTags.isEmpty()) return@inReadTransaction emptyList()
+
+                    val links = entryDao.getActiveVisibleEntryTagLinks()
+
+                    class TagAccumulator {
+                        val entryIds = HashSet<String>()
+                        val openTodoIds = HashSet<String>()
+                        var latestPreview: String? = null
+                        var latestCreatedAtMs: Long? = null
+                    }
+
+                    val statsByPathLower = HashMap<String, TagAccumulator>()
+
+                    for (link in links) {
+                        val normalized = TagPathNormalizer.normalize(link.tagFullPath)
+                        if (normalized.isEmpty()) continue
+                        val segments = normalized.split('/')
+                        val prefixBuilder = StringBuilder()
+                        for (i in segments.indices) {
+                            if (i > 0) prefixBuilder.append('/')
+                            prefixBuilder.append(segments[i])
+                            val key = prefixBuilder.toString().lowercase(Locale.ROOT)
+                            val acc = statsByPathLower.getOrPut(key) { TagAccumulator() }
+                            acc.entryIds += link.entryId
+                            if (link.taskStatus == TaskStatus.TODO.name) {
+                                acc.openTodoIds += link.entryId
+                            }
+                            if (acc.latestCreatedAtMs == null) {
+                                acc.latestCreatedAtMs = link.createdAtMs
+                                acc.latestPreview = link.preview.trim().takeIf { it.isNotEmpty() }
+                            }
+                        }
+                    }
+
+                    allTags
+                        .map { tag ->
+                            val key = TagPathNormalizer.normalize(tag.fullPath).lowercase(Locale.ROOT)
+                            val acc = statsByPathLower[key]
+                            DrawerTagSummary(
+                                tag = tag,
+                                entryCount = acc?.entryIds?.size ?: 0,
+                                openTodoCount = acc?.openTodoIds?.size ?: 0,
+                                latestPreview = acc?.latestPreview,
+                                latestCreatedAtMs = acc?.latestCreatedAtMs,
+                            )
+                        }
+                        .sortedWith(
+                            compareByDescending<DrawerTagSummary> { it.latestCreatedAtMs ?: Long.MIN_VALUE }
+                                .thenBy { it.tag.leafName.lowercase(Locale.ROOT) }
+                                .thenBy { it.tag.fullPath.lowercase(Locale.ROOT) },
+                        )
                 }
             }
             .distinctUntilChanged()

@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.outlined.Menu
 import io.github.k8242.threadlog.core.model.SearchHit
 import io.github.k8242.threadlog.core.model.Tag
 
@@ -70,6 +71,7 @@ fun SearchScreen(
     initialQuery: String? = null,
     onJumpToEntryInChat: (entryId: String, localDate: String) -> Unit = { _, _ -> },
     onOpenContextWindow: (anchorEntryId: String, highlightQuery: String?) -> Unit = { _, _ -> },
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
@@ -90,6 +92,7 @@ fun SearchScreen(
         onJumpToEntryInChat = onJumpToEntryInChat,
         onOpenContextWindow = onOpenContextWindow,
         formatDateTimeLabel = viewModel::formatDateTimeLabel,
+        onOpenDrawer = onOpenDrawer,
         modifier = modifier,
     )
 }
@@ -109,6 +112,7 @@ fun SearchScreen(
     onJumpToEntryInChat: (entryId: String, localDate: String) -> Unit,
     onOpenContextWindow: (anchorEntryId: String, highlightQuery: String?) -> Unit,
     formatDateTimeLabel: (SearchHit) -> String,
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
@@ -124,6 +128,7 @@ fun SearchScreen(
                 onQueryChanged = onQueryChanged,
                 onClearQuery = onClearQuery,
                 onToggleIncludeHiddenAutoTags = onToggleIncludeHiddenAutoTags,
+                onOpenDrawer = onOpenDrawer,
             )
 
             if (uiState.isSearching) {
@@ -171,40 +176,55 @@ private fun SearchHeader(
     onQueryChanged: (String) -> Unit,
     onClearQuery: () -> Unit,
     onToggleIncludeHiddenAutoTags: () -> Unit,
+    onOpenDrawer: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChanged,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            placeholder = { Text(text = "Search entries, tags, or links") },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = "Search",
-                )
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = onClearQuery) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Clear search query",
-                        )
-                    }
-                }
-            },
-        )
-
         Row(
             modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            IconButton(onClick = onOpenDrawer) {
+                Icon(
+                    imageVector = Icons.Outlined.Menu,
+                    contentDescription = "Open navigation panel",
+                )
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                shape = RoundedCornerShape(24.dp),
+                placeholder = { Text(text = "Search entries, tags, or links") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = "Search",
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = onClearQuery) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Clear search query",
+                            )
+                        }
+                    }
+                },
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {

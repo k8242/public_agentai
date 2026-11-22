@@ -130,6 +130,7 @@ internal class FakeEntryRepository(
         pendingAttachments: List<PendingAttachment>,
         nowMs: Long,
         zoneId: String?,
+        taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
     ): EntryWithDetails = error("Not used in search tests")
 
     override suspend fun editEntry(entryId: String, newBodyRaw: String, nowMs: Long): EntryWithDetails =

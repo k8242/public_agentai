@@ -68,6 +68,7 @@ object WorkbookMapper {
         "reply_to_id",
         "updated_at_iso",
         "deleted",
+        "task_status",
     )
 
     val TAG_TREE_HEADERS: List<String> = listOf(
@@ -152,6 +153,7 @@ object WorkbookMapper {
             replyToId = entry.replyToId?.takeIf { it.isNotBlank() },
             updatedAtIso = entry.updatedAtMs?.let { formatEpochMsWithZone(it, entry.zoneId) },
             deleted = entry.isDeleted,
+            taskStatus = entry.taskStatus.name,
         )
     }
 
@@ -283,6 +285,7 @@ object WorkbookMapper {
             rejectedTagPaths = rejectedPaths,
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
+            taskStatus = entry.entry.taskStatus.name,
         )
     }
 
@@ -308,6 +311,7 @@ object WorkbookMapper {
             rejectedTagPaths = rejectedPaths,
             bookmarkSignatures = bookmarkSignatures,
             attachmentSha256s = attachmentSha256s,
+            taskStatus = row.taskStatus,
         )
     }
 
@@ -404,6 +408,7 @@ object WorkbookMapper {
                 row.replyToId.orEmpty(),
                 row.updatedAtIso.orEmpty(),
                 row.deleted.toString(),
+                normalizeTaskStatus(row.taskStatus),
             )
         }
         return rows
@@ -440,6 +445,7 @@ object WorkbookMapper {
                 val replyToId = row.cell("reply_to_id", 9).trim().takeIf { it.isNotEmpty() }
                 val updatedAtIso = row.cell("updated_at_iso", 10).trim().takeIf { it.isNotEmpty() }
                 val deleted = parseBooleanCell(row.cell("deleted", 11))
+                val taskStatus = normalizeTaskStatus(row.cell("task_status", 12))
 
                 SheetEntryRow(
                     entryId = entryId,
@@ -454,6 +460,7 @@ object WorkbookMapper {
                     replyToId = replyToId,
                     updatedAtIso = updatedAtIso,
                     deleted = deleted,
+                    taskStatus = taskStatus,
                 )
             }
     }
@@ -601,7 +608,9 @@ object WorkbookMapper {
         rejectedTagPaths: Collection<String>,
         bookmarkSignatures: Collection<String>,
         attachmentSha256s: Collection<String>,
+        taskStatus: String = "NONE",
     ): String {
+        val normalizedTask = normalizeTaskStatus(taskStatus)
         val canonical = buildString {
             append("v1\n")
             append("body=").append(bodyRaw).append('\n')
@@ -612,9 +621,19 @@ object WorkbookMapper {
             append("rejected=").append(rejectedTagPaths.sorted().joinToString(",")).append('\n')
             append("bookmarks=").append(bookmarkSignatures.sorted().joinToString(";;")).append('\n')
             append("media=").append(attachmentSha256s.sorted().joinToString(","))
+            if (normalizedTask != "NONE") {
+                append("\ntask=").append(normalizedTask)
+            }
         }
         return ContentHasher.sha256Hex(canonical)
     }
+
+    private fun normalizeTaskStatus(raw: String): String =
+        when (raw.trim().uppercase(Locale.ROOT)) {
+            "TODO" -> "TODO"
+            "DONE" -> "DONE"
+            else -> "NONE"
+        }
 
     private fun safeZoneId(zoneId: String): ZoneId =
         if (zoneId.isBlank()) {

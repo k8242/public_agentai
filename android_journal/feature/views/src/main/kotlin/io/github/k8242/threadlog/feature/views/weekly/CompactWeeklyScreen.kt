@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ import io.github.k8242.threadlog.feature.views.common.sanitizeSingleLinePreview
 fun CompactWeeklyScreen(
     onOpenEntryInChat: (entryId: String, localDate: String) -> Unit = { _, _ -> },
     onOpenContextWindow: (entryId: String) -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: CompactWeeklyViewModel = hiltViewModel(),
 ) {
@@ -79,6 +81,7 @@ fun CompactWeeklyScreen(
         onCollapseAll = viewModel::collapseAll,
         onOpenEntryInChat = onOpenEntryInChat,
         onOpenContextWindow = onOpenContextWindow,
+        onOpenDrawer = onOpenDrawer,
         modifier = modifier,
     )
 }
@@ -94,6 +97,7 @@ fun CompactWeeklyScreen(
     onCollapseAll: () -> Unit,
     onOpenEntryInChat: (entryId: String, localDate: String) -> Unit = { _, _ -> },
     onOpenContextWindow: (entryId: String) -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -101,6 +105,14 @@ fun CompactWeeklyScreen(
         topBar = {
             TopAppBar(
                 title = { Text(text = "Weekly") },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Outlined.Menu,
+                            contentDescription = "Open navigation panel",
+                        )
+                    }
+                },
                 actions = {
                     if (uiState.hasExpandedItems) {
                         IconButton(onClick = onCollapseAll) {

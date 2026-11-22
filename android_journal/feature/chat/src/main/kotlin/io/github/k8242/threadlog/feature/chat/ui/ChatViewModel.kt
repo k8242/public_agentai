@@ -7,9 +7,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import io.github.k8242.threadlog.core.model.ChatFeedFilter
+import io.github.k8242.threadlog.core.model.Entry
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TaskStatus
+import io.github.k8242.threadlog.core.model.TodoFilterMode
 import io.github.k8242.threadlog.core.model.WeekStart
 import io.github.k8242.threadlog.core.model.contract.AutoTagScheduler
 import io.github.k8242.threadlog.core.model.contract.BookmarkRepository
@@ -29,17 +33,23 @@ import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 import io.github.k8242.threadlog.core.model.parser.TagTriggerKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ChatUiState(
+    val activeFilter: ChatFeedFilter = ChatFeedFilter.All,
+    val openTodoCount: Int = 0,
+    val completedTodoCount: Int = 0,
     val composerText: String = "",
     val composerCursor: Int = 0,
+    val composerIsTask: Boolean = false,
     val activeTagTrigger: ActiveTagTrigger? = null,
     val tagSuggestions: List<Tag> = emptyList(),
     val selectedTagIds: List<String> = emptyList(),
@@ -54,9 +64,11 @@ data class ChatUiState(
     val offlineOnlyLinks: Boolean = false,
     val pendingAutoTagCount: Int = 0,
     val undoDeletedEntryId: String? = null,
+    val scrollToNewestEntryId: String? = null,
     val errorMessage: String? = null,
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val entryRepository: EntryRepository,
@@ -72,16 +84,23 @@ class ChatViewModel @Inject constructor(
     private val bookmarkTitleScheduler: BookmarkTitleScheduler,
 ) : ViewModel() {
 
+    private val activeFilterFlow = MutableStateFlow<ChatFeedFilter>(ChatFeedFilter.All)
+
     val pagedEntries: Flow<PagingData<EntryWithDetails>> =
-        entryRepository.observePagedEntries().cachedIn(viewModelScope)
+        activeFilterFlow
+            .flatMapLatest { filter -> entryRepository.observePagedEntries(filter) }
+            .cachedIn(viewModelScope)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private var autoAttachedFilterTagId: String? = null
 
     init {
         observeTags()
         observeSettings()
         observePendingAutoTags()
+        observeDrawerOverview()
     }
 
     private fun observeTags() {
@@ -119,6 +138,118 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(pendingAutoTagCount = pendingEntries.size)
                 }
+            }
+        }
+    }
+
+    private fun observeDrawerOverview() {
+        viewModelScope.launch {
+            entryRepository.observeDrawerOverview().collect { overview ->
+                _uiState.update { state ->
+                    state.copy(
+                        openTodoCount = overview.openTodoCount,
+                        completedTodoCount = overview.completedTodoCount,
+                    )
+                }
+            }
+        }
+    }
+
+    fun setFeedFilter(filter: ChatFeedFilter) {
+        if (activeFilterFlow.value == filter) return
+        activeFilterFlow.value = filter
+        _uiState.update { state ->
+            val previousAutoTag = autoAttachedFilterTagId
+            val cleanedTags = if (previousAutoTag != null) {
+                state.selectedTagIds.filterNot { it == previousAutoTag }
+            } else {
+                state.selectedTagIds
+            }
+
+            when (filter) {
+                ChatFeedFilter.All -> {
+                    autoAttachedFilterTagId = null
+                    state.copy(
+                        activeFilter = filter,
+                        selectedTagIds = cleanedTags,
+                        composerIsTask = false,
+                    )
+                }
+
+                is ChatFeedFilter.Todos -> {
+                    autoAttachedFilterTagId = null
+                    state.copy(
+                        activeFilter = filter,
+                        selectedTagIds = cleanedTags,
+                        composerIsTask = true,
+                    )
+                }
+
+                is ChatFeedFilter.TagSubtree -> {
+                    autoAttachedFilterTagId = filter.tagId
+                    val nextTags = if (filter.tagId in cleanedTags) {
+                        cleanedTags
+                    } else {
+                        cleanedTags + filter.tagId
+                    }
+                    state.copy(
+                        activeFilter = filter,
+                        selectedTagIds = nextTags,
+                        composerIsTask = false,
+                    )
+                }
+            }
+        }
+    }
+
+    fun setTodoFilterMode(mode: TodoFilterMode) {
+        val current = activeFilterFlow.value
+        if (current is ChatFeedFilter.Todos && current.mode == mode) return
+        val next = ChatFeedFilter.Todos(mode = mode)
+        activeFilterFlow.value = next
+        _uiState.update { it.copy(activeFilter = next) }
+    }
+
+    fun toggleComposerTask() {
+        _uiState.update { it.copy(composerIsTask = !it.composerIsTask) }
+    }
+
+    fun consumeScrollToNewest(entryId: String) {
+        _uiState.update { state ->
+            if (state.scrollToNewestEntryId == entryId) {
+                state.copy(scrollToNewestEntryId = null)
+            } else {
+                state
+            }
+        }
+    }
+
+    fun toggleNoteTask(entry: Entry) {
+        val nextStatus = if (entry.taskStatus == TaskStatus.NONE) {
+            TaskStatus.TODO
+        } else {
+            TaskStatus.NONE
+        }
+        setEntryTaskStatus(entry.id, nextStatus)
+    }
+
+    fun toggleTaskCompleted(entry: Entry) {
+        val nextStatus = if (entry.taskStatus == TaskStatus.DONE) {
+            TaskStatus.TODO
+        } else {
+            TaskStatus.DONE
+        }
+        setEntryTaskStatus(entry.id, nextStatus)
+    }
+
+    private fun setEntryTaskStatus(entryId: String, taskStatus: TaskStatus) {
+        viewModelScope.launch {
+            try {
+                entryRepository.setTaskStatus(entryId = entryId, taskStatus = taskStatus)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update task status") }
             }
         }
     }
@@ -357,25 +488,34 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                val taskStatus = if (snapshot.composerIsTask) TaskStatus.TODO else TaskStatus.NONE
                 val created = entryRepository.createEntry(
                     bodyRaw = snapshot.composerText,
                     userTagIds = snapshot.selectedTagIds,
                     replyToId = snapshot.replyTarget?.entry?.id,
                     pendingAttachments = snapshot.pendingAttachments,
+                    taskStatus = taskStatus,
                 )
                 autoTagScheduler.enqueueAutoTag(created.entry.id)
                 if (created.bookmarks.isNotEmpty() && !snapshot.offlineOnlyLinks) {
                     bookmarkTitleScheduler.enqueueTitleFetch(created.entry.id)
                 }
                 _uiState.update { state ->
+                    val defaultTagsForFilter = when (val filter = state.activeFilter) {
+                        is ChatFeedFilter.TagSubtree -> listOf(filter.tagId)
+                        else -> emptyList()
+                    }
+                    val defaultIsTaskForFilter = state.activeFilter is ChatFeedFilter.Todos
                     state.copy(
                         composerText = "",
                         composerCursor = 0,
+                        composerIsTask = defaultIsTaskForFilter,
                         activeTagTrigger = null,
                         tagSuggestions = emptyList(),
-                        selectedTagIds = emptyList(),
+                        selectedTagIds = defaultTagsForFilter,
                         pendingAttachments = emptyList(),
                         replyTarget = null,
+                        scrollToNewestEntryId = created.entry.id,
                         errorMessage = null,
                     )
                 }

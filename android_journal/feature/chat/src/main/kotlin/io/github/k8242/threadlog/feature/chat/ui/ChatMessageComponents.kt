@@ -35,8 +35,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -210,6 +213,8 @@ fun MessageBubbleItem(
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onManageTags: () -> Unit,
+    onToggleTask: () -> Unit,
+    onToggleTaskDone: () -> Unit,
     onDelete: () -> Unit,
     onToggleBookmarkCollapsed: (bookmarkId: String, currentlyCollapsed: Boolean) -> Unit,
     onPromoteAutoTag: (tagId: String) -> Unit,
@@ -227,11 +232,26 @@ fun MessageBubbleItem(
     val animatedOffsetPx by animateFloatAsState(targetValue = dragOffsetPx, label = "swipeReplyOffset")
     var menuExpanded by remember { mutableStateOf(false) }
 
+    val entry = entryWithDetails.entry
+    val isTask = entry.isTask
+    val isTaskDone = entry.isTaskDone
+
+    val bubbleContainerColor = when {
+        isTask && !isTaskDone -> MaterialTheme.colorScheme.surfaceContainerLow
+        isTaskDone -> MaterialTheme.colorScheme.surfaceContainerLowest
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val bubbleBorderColor = when {
+        isTask && !isTaskDone -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    }
+    val bubbleBorderWidth = if (isTask && !isTaskDone) 1.dp else 0.5.dp
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 3.dp)
-            .pointerInput(entryWithDetails.entry.id) {
+            .pointerInput(entry.id) {
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { _, dragAmount ->
                         val next = (dragOffsetPx + dragAmount).coerceIn(0f, maxDragPx)
@@ -274,8 +294,8 @@ fun MessageBubbleItem(
             horizontalArrangement = Arrangement.End,
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 1.dp,
+                color = bubbleContainerColor,
+                tonalElevation = if (isTaskDone) 0.dp else 1.dp,
                 shape = RoundedCornerShape(
                     topStart = 16.dp,
                     topEnd = 4.dp,
@@ -283,12 +303,11 @@ fun MessageBubbleItem(
                     bottomEnd = 16.dp,
                 ),
                 border = BorderStroke(
-                    width = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    width = bubbleBorderWidth,
+                    color = bubbleBorderColor,
                 ),
                 modifier = Modifier
-                    .widthIn(min = 140.dp, max = 360.dp)
-                    .fillMaxWidth(0.92f)
+                    .fillMaxWidth(0.80f)
                     .combinedClickable(
                         onClick = {},
                         onLongClick = { menuExpanded = true },
@@ -298,12 +317,38 @@ fun MessageBubbleItem(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // Header row: Reply preview (if any) + overflow action menu
+                    // Header row: Reply preview / TODO badge (if any) + overflow action menu
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (isTask) {
+                                Surface(
+                                    color = if (isTaskDone) {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    } else {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable(onClick = onToggleTaskDone),
+                                ) {
+                                    Text(
+                                        text = if (isTaskDone) "DONE" else "TODO",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isTaskDone) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        },
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    )
+                                }
+                            }
                             entryWithDetails.replyPreview?.let { preview ->
                                 QuotedReplyBar(replyPreview = preview)
                             }
@@ -325,6 +370,31 @@ fun MessageBubbleItem(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false },
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (isTask) "Remove TODO" else "Mark as TODO") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (isTask) Icons.Filled.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onToggleTask()
+                                    },
+                                )
+                                if (isTask) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (isTaskDone) "Reopen TODO" else "Mark Done") },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.TaskAlt, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onToggleTaskDone()
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Reply") },
                                     leadingIcon = {
@@ -369,9 +439,44 @@ fun MessageBubbleItem(
                         }
                     }
 
-                    // Body text
-                    if (entryWithDetails.entry.bodyRaw.isNotBlank()) {
-                        FormattedMessageBody(parsedMessage = parsedMessage)
+                    // Body text (with 1-tap inline task checkbox when this note is a TODO)
+                    if (entry.bodyRaw.isNotBlank() || isTask) {
+                        if (isTask) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                IconButton(
+                                    onClick = onToggleTaskDone,
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = if (isTaskDone) {
+                                            Icons.Filled.CheckBox
+                                        } else {
+                                            Icons.Outlined.CheckBoxOutlineBlank
+                                        },
+                                        contentDescription = if (isTaskDone) "Reopen TODO" else "Complete TODO",
+                                        tint = if (isTaskDone) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                if (entry.bodyRaw.isNotBlank()) {
+                                    FormattedMessageBody(
+                                        parsedMessage = parsedMessage,
+                                        isCompletedTask = isTaskDone,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        } else {
+                            FormattedMessageBody(parsedMessage = parsedMessage)
+                        }
                     }
 
                     // Attachments grid
@@ -441,7 +546,7 @@ fun MessageBubbleItem(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (entryWithDetails.entry.isEdited) {
+                        if (entry.isEdited) {
                             Text(
                                 text = "Edited",
                                 style = MaterialTheme.typography.labelSmall,

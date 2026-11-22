@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,7 @@ import io.github.k8242.threadlog.feature.views.common.LeafTagChip
 fun CalendarScreen(
     onOpenEntryInChat: (entryId: String, localDate: String) -> Unit = { _, _ -> },
     onOpenContextWindow: (entryId: String) -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: CalendarViewModel = hiltViewModel(),
 ) {
@@ -79,6 +81,7 @@ fun CalendarScreen(
         onSelectTagFilter = viewModel::selectTagFilter,
         onOpenEntryInChat = onOpenEntryInChat,
         onOpenContextWindow = onOpenContextWindow,
+        onOpenDrawer = onOpenDrawer,
         modifier = modifier,
     )
 }
@@ -97,6 +100,7 @@ fun CalendarScreen(
     onSelectTagFilter: (fullPath: String?) -> Unit,
     onOpenEntryInChat: (entryId: String, localDate: String) -> Unit = { _, _ -> },
     onOpenContextWindow: (entryId: String) -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -104,6 +108,14 @@ fun CalendarScreen(
         topBar = {
             TopAppBar(
                 title = { Text(text = "Calendar") },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Outlined.Menu,
+                            contentDescription = "Open navigation panel",
+                        )
+                    }
+                },
                 actions = {
                     TextButton(onClick = onJumpToToday) {
                         Text(text = "Today")

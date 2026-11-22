@@ -22,6 +22,7 @@ import io.github.k8242.threadlog.core.model.RuleMatchType
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.parser.ContentHasher
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -84,6 +85,7 @@ internal object EntryContentHasher {
         rejectedTagPaths: Collection<String>,
         bookmarkSignatures: Collection<String>,
         attachmentSha256s: Collection<String>,
+        taskStatus: TaskStatus = TaskStatus.NONE,
     ): String {
         val canonical = buildString {
             append("v1\n")
@@ -95,6 +97,9 @@ internal object EntryContentHasher {
             append("rejected=").append(rejectedTagPaths.sorted().joinToString(",")).append('\n')
             append("bookmarks=").append(bookmarkSignatures.sorted().joinToString(";;")).append('\n')
             append("media=").append(attachmentSha256s.sorted().joinToString(","))
+            if (taskStatus != TaskStatus.NONE) {
+                append("\ntask=").append(taskStatus.name)
+            }
         }
         return ContentHasher.sha256Hex(canonical)
     }
@@ -113,6 +118,7 @@ internal fun EntryEntity.toDomain(): Entry =
         contentHash = contentHash,
         updatedAtMs = updatedAtMs,
         deletedAtMs = deletedAtMs,
+        taskStatus = runCatching { TaskStatus.valueOf(taskStatus) }.getOrDefault(TaskStatus.NONE),
     )
 
 internal fun TagEntity.toDomain(): Tag =

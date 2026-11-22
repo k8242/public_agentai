@@ -331,18 +331,102 @@ class ChatViewModelTest {
         attachments = emptyList(),
     )
 
+    @Test
+    fun sendingNote_emitsScrollToNewestEntryId_andConsumeClearsIt() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        vm.onComposerTextChanged("Fresh note", 10)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        val createdId = entryRepo.createdCalls.single().createdId
+        assertThat(vm.uiState.value.scrollToNewestEntryId).isEqualTo(createdId)
+
+        vm.consumeScrollToNewest(createdId)
+        assertThat(vm.uiState.value.scrollToNewestEntryId).isNull()
+    }
+
+    @Test
+    fun selectingTodosFilter_preEnablesComposerTask_andPreservesAfterSend() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        vm.setFeedFilter(io.github.k8242.threadlog.core.model.ChatFeedFilter.Todos())
+        assertThat(vm.uiState.value.composerIsTask).isTrue()
+
+        vm.onComposerTextChanged("Buy groceries", 13)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.createdCalls.single().taskStatus)
+            .isEqualTo(io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+        assertThat(vm.uiState.value.composerIsTask).isTrue()
+    }
+
+    @Test
+    fun selectingTagFilter_preSelectsTagInComposer_andClearsWhenReturningToAll() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        val filter = io.github.k8242.threadlog.core.model.ChatFeedFilter.TagSubtree(
+            tagId = "t-lex",
+            fullPath = "people/friends/Lex",
+            displayLabel = "Lex",
+        )
+        vm.setFeedFilter(filter)
+        assertThat(vm.uiState.value.selectedTagIds).contains("t-lex")
+
+        vm.onComposerTextChanged("Coffee catchup", 14)
+        vm.sendOrSave()
+        advanceUntilIdle()
+        assertThat(entryRepo.createdCalls.single().userTagIds).contains("t-lex")
+        assertThat(vm.uiState.value.selectedTagIds).contains("t-lex")
+
+        vm.setFeedFilter(io.github.k8242.threadlog.core.model.ChatFeedFilter.All)
+        assertThat(vm.uiState.value.selectedTagIds).doesNotContain("t-lex")
+    }
+
+    @Test
+    fun toggleNoteTask_andToggleTaskCompleted_delegateToRepository() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        val regular = sampleEntry("e-1", "Note").entry
+        vm.toggleNoteTask(regular)
+        advanceUntilIdle()
+        assertThat(entryRepo.taskStatusUpdates)
+            .containsExactly("e-1" to io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+
+        val openTodo = regular.copy(taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+        vm.toggleTaskCompleted(openTodo)
+        advanceUntilIdle()
+        assertThat(entryRepo.taskStatusUpdates.last())
+            .isEqualTo("e-1" to io.github.k8242.threadlog.core.model.TaskStatus.DONE)
+
+        val doneTodo = regular.copy(taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.DONE)
+        vm.toggleTaskCompleted(doneTodo)
+        advanceUntilIdle()
+        assertThat(entryRepo.taskStatusUpdates.last())
+            .isEqualTo("e-1" to io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+
+        vm.toggleNoteTask(openTodo)
+        advanceUntilIdle()
+        assertThat(entryRepo.taskStatusUpdates.last())
+            .isEqualTo("e-1" to io.github.k8242.threadlog.core.model.TaskStatus.NONE)
+    }
+
     private data class CreatedCall(
         val createdId: String,
         val bodyRaw: String,
         val userTagIds: List<String>,
         val replyToId: String?,
         val attachments: List<PendingAttachment>,
+        val taskStatus: io.github.k8242.threadlog.core.model.TaskStatus =
+            io.github.k8242.threadlog.core.model.TaskStatus.NONE,
     )
 
     private class FakeEntryRepository : EntryRepository {
         private var nextSeq = 1
         val createdCalls = mutableListOf<CreatedCall>()
         val editedCalls = mutableListOf<Pair<String, String>>()
+        val taskStatusUpdates = mutableListOf<Pair<String, io.github.k8242.threadlog.core.model.TaskStatus>>()
         val softDeletedIds = mutableListOf<String>()
         val restoredIds = mutableListOf<String>()
         val pendingAutoTagFlow = MutableStateFlow<List<EntryWithDetails>>(emptyList())
@@ -360,9 +444,10 @@ class ChatViewModelTest {
             pendingAttachments: List<PendingAttachment>,
             nowMs: Long,
             zoneId: String?,
+            taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
         ): EntryWithDetails {
             val id = "created-${nextSeq++}"
-            createdCalls += CreatedCall(id, bodyRaw, userTagIds, replyToId, pendingAttachments)
+            createdCalls += CreatedCall(id, bodyRaw, userTagIds, replyToId, pendingAttachments, taskStatus)
             val bookmarks = if (bodyRaw.contains("http")) {
                 listOf(
                     Bookmark(
@@ -386,6 +471,7 @@ class ChatViewModelTest {
                     bodyPlain = bodyRaw,
                     replyToId = replyToId,
                     contentHash = "hash-$id",
+                    taskStatus = taskStatus,
                 ),
                 tags = emptyList(),
                 bookmarks = bookmarks,
@@ -402,6 +488,14 @@ class ChatViewModelTest {
                     )
                 },
             )
+        }
+
+        override suspend fun setTaskStatus(
+            entryId: String,
+            taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
+            nowMs: Long,
+        ) {
+            taskStatusUpdates += entryId to taskStatus
         }
 
         override suspend fun editEntry(

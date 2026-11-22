@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,8 +38,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
@@ -90,6 +93,7 @@ fun ChatComposer(
     onTextChanged: (text: String, cursor: Int) -> Unit,
     onSelectTagSuggestion: (Tag) -> Unit,
     onToggleSelectedTag: (String) -> Unit,
+    onToggleComposerTask: () -> Unit,
     onImageBytesReceived: (ByteArray) -> Unit,
     onRemovePendingAttachment: (String) -> Unit,
     onCancelReply: () -> Unit,
@@ -162,7 +166,11 @@ fun ChatComposer(
         shadowElevation = 4.dp,
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+        ) {
             // Live @/# autocomplete suggestions overlay
             if (uiState.activeTagTrigger != null && uiState.tagSuggestions.isNotEmpty()) {
                 TagSuggestionList(
@@ -204,14 +212,37 @@ fun ChatComposer(
                 )
             }
 
-            // Selected tags strip
-            if (uiState.selectedTagIds.isNotEmpty() && uiState.editingEntry == null) {
+            // Selected tags & TODO mode strip
+            if ((uiState.selectedTagIds.isNotEmpty() || uiState.composerIsTask) && uiState.editingEntry == null) {
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    if (uiState.composerIsTask) {
+                        item(key = "composer_todo_chip") {
+                            InputChip(
+                                selected = true,
+                                onClick = onToggleComposerTask,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckBox,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                                label = { Text(text = "TODO", style = MaterialTheme.typography.labelSmall) },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = "Unmark TODO",
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                            )
+                        }
+                    }
                     items(uiState.selectedTagIds, key = { it }) { tagId ->
                         val tag = tagsById[tagId]
                         val label = uiState.tagDisplayLabels[tagId] ?: tag?.leafName ?: tagId
@@ -235,9 +266,9 @@ fun ChatComposer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (uiState.editingEntry == null) {
                     IconButton(
@@ -246,6 +277,7 @@ fun ChatComposer(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                             )
                         },
+                        modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Image,
@@ -253,10 +285,36 @@ fun ChatComposer(
                         )
                     }
 
-                    IconButton(onClick = onOpenQuickTagPicker) {
+                    IconButton(
+                        onClick = onOpenQuickTagPicker,
+                        modifier = Modifier.size(40.dp),
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.Label,
                             contentDescription = "Pick tags",
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onToggleComposerTask,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.composerIsTask) {
+                                Icons.Filled.CheckBox
+                            } else {
+                                Icons.Outlined.CheckBoxOutlineBlank
+                            },
+                            contentDescription = if (uiState.composerIsTask) {
+                                "Creating TODO (tap to switch to regular note)"
+                            } else {
+                                "Create as TODO"
+                            },
+                            tint = if (uiState.composerIsTask) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
                 }
@@ -269,10 +327,10 @@ fun ChatComposer(
                     },
                     placeholder = {
                         Text(
-                            text = if (uiState.editingEntry != null) {
-                                "Edit journal entry..."
-                            } else {
-                                "Write a note... (@people, #tags)"
+                            text = when {
+                                uiState.editingEntry != null -> "Edit journal entry..."
+                                uiState.composerIsTask -> "Add a TODO... (@people, #tags)"
+                                else -> "Write a note... (@people, #tags)"
                             },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

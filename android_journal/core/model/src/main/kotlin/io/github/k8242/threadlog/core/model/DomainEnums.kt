@@ -60,3 +60,36 @@ enum class RuleMatchType {
     DOMAIN,
     REGEX,
 }
+
+@Serializable
+enum class TaskStatus {
+    NONE,
+    TODO,
+    DONE,
+}
+
+@Serializable
+enum class TodoFilterMode {
+    OPEN,
+    DONE,
+    ALL,
+}
+
+@Serializable
+enum class AppColorScheme {
+    TEAL,
+    WHATSAPP,
+    OCEAN,
+    SUNSET,
+    LAVENDER,
+    MONOCHROME,
+    DYNAMIC,
+}
+
+@Serializable
+enum class ThemeMode {
+    SYSTEM,
+    LIGHT,
+    DARK,
+}
+

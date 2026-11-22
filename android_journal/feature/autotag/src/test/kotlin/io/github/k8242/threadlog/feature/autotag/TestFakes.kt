@@ -140,6 +140,7 @@ internal class FakeEntryRepository(
         pendingAttachments: List<PendingAttachment>,
         nowMs: Long,
         zoneId: String?,
+        taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
     ): EntryWithDetails = throw UnsupportedOperationException()
 
     override suspend fun editEntry(

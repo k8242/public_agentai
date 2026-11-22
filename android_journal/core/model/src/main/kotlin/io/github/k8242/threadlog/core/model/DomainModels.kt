@@ -18,9 +18,12 @@ data class Entry(
     val contentHash: String,           // SHA-256 hex for 3-way sync diffing
     val updatedAtMs: Long? = null,     // Set on edit; null if never edited
     val deletedAtMs: Long? = null,     // Non-null = soft-deleted tombstone
+    val taskStatus: TaskStatus = TaskStatus.NONE,
 ) {
     val isEdited: Boolean get() = updatedAtMs != null && updatedAtMs > createdAtMs
     val isDeleted: Boolean get() = deletedAtMs != null
+    val isTask: Boolean get() = taskStatus != TaskStatus.NONE
+    val isTaskDone: Boolean get() = taskStatus == TaskStatus.DONE
 }
 
 @Serializable
@@ -124,6 +127,39 @@ data class AutoTagSuggestion(
     val reason: String,
 )
 
+/** Active filter controlling which notes appear in the Chat feed. */
+sealed interface ChatFeedFilter {
+    data object All : ChatFeedFilter
+
+    data class Todos(
+        val mode: TodoFilterMode = TodoFilterMode.OPEN,
+    ) : ChatFeedFilter
+
+    data class TagSubtree(
+        val tagId: String,
+        val fullPath: String,
+        val displayLabel: String,
+    ) : ChatFeedFilter
+}
+
+/** High-level counts & previews displayed in the hidable left panel. */
+data class DrawerOverviewSummary(
+    val totalEntryCount: Int = 0,
+    val latestEntryPreview: String? = null,
+    val openTodoCount: Int = 0,
+    val completedTodoCount: Int = 0,
+    val latestOpenTodoPreview: String? = null,
+)
+
+/** Per-tag conversation-style summary row displayed in the hidable left panel. */
+data class DrawerTagSummary(
+    val tag: Tag,
+    val entryCount: Int,
+    val openTodoCount: Int,
+    val latestPreview: String? = null,
+    val latestCreatedAtMs: Long? = null,
+)
+
 @Serializable
 data class UserSettings(
     val weekStart: WeekStart = WeekStart.MONDAY,
@@ -134,4 +170,7 @@ data class UserSettings(
     val linkedMediaFolderId: String? = null,
     val lastExportIso: String? = null,
     val deviceId: String = "",
+    val colorScheme: AppColorScheme = AppColorScheme.TEAL,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 )
+

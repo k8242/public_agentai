@@ -4,22 +4,24 @@
 package io.github.k8242.threadlog.app.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ViewAgenda
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -27,7 +29,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import io.github.k8242.threadlog.app.ui.drawer.DrawerNavDestination
+import io.github.k8242.threadlog.app.ui.drawer.DrawerViewModel
+import io.github.k8242.threadlog.app.ui.drawer.ThreadLogDrawerSheet
 import io.github.k8242.threadlog.app.ui.settings.SettingsScreen
+import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.navigation.ThreadLogRoute
 import io.github.k8242.threadlog.feature.autotag.ui.AutoTagReviewScreen
 import io.github.k8242.threadlog.feature.backup.ui.BackupScreen
@@ -36,54 +42,64 @@ import io.github.k8242.threadlog.feature.search.context.ContextWindowScreen
 import io.github.k8242.threadlog.feature.search.ui.SearchScreen
 import io.github.k8242.threadlog.feature.views.calendar.CalendarScreen
 import io.github.k8242.threadlog.feature.views.weekly.CompactWeeklyScreen
-
-private data class TopLevelDestination(
-    val label: String,
-    val icon: ImageVector,
-    val route: ThreadLogRoute,
-    val matches: (androidx.navigation.NavDestination?) -> Boolean,
-)
+import kotlinx.coroutines.launch
 
 @Composable
-fun ThreadLogApp(modifier: Modifier = Modifier) {
+fun ThreadLogApp(
+    modifier: Modifier = Modifier,
+    drawerViewModel: DrawerViewModel = hiltViewModel(),
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerUiState by drawerViewModel.uiState.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
 
-    val topLevelDestinations = listOf(
-        TopLevelDestination(
+    var activeChatFilter by remember { mutableStateOf<ChatFeedFilter>(ChatFeedFilter.All) }
+
+    val isOnChatScreen = currentDestination == null || currentDestination.hasRoute<ThreadLogRoute.Chat>()
+
+    val drawerDestinations = listOf(
+        DrawerNavDestination(
             label = "Chat",
             icon = Icons.AutoMirrored.Outlined.Chat,
             route = ThreadLogRoute.Chat(),
-            matches = { it?.hasRoute<ThreadLogRoute.Chat>() == true },
+            selected = currentDestination?.hasRoute<ThreadLogRoute.Chat>() == true,
         ),
-        TopLevelDestination(
+        DrawerNavDestination(
             label = "Weekly",
             icon = Icons.Outlined.ViewAgenda,
             route = ThreadLogRoute.CompactWeekly,
-            matches = { it?.hasRoute<ThreadLogRoute.CompactWeekly>() == true },
+            selected = currentDestination?.hasRoute<ThreadLogRoute.CompactWeekly>() == true,
         ),
-        TopLevelDestination(
+        DrawerNavDestination(
             label = "Calendar",
             icon = Icons.Outlined.CalendarMonth,
             route = ThreadLogRoute.Calendar,
-            matches = { it?.hasRoute<ThreadLogRoute.Calendar>() == true },
+            selected = currentDestination?.hasRoute<ThreadLogRoute.Calendar>() == true,
         ),
-        TopLevelDestination(
+        DrawerNavDestination(
             label = "Search",
             icon = Icons.Outlined.Search,
             route = ThreadLogRoute.Search(),
-            matches = { it?.hasRoute<ThreadLogRoute.Search>() == true },
+            selected = currentDestination?.hasRoute<ThreadLogRoute.Search>() == true,
         ),
-        TopLevelDestination(
+        DrawerNavDestination(
             label = "Backup",
             icon = Icons.Outlined.Backup,
             route = ThreadLogRoute.Backup,
-            matches = { it?.hasRoute<ThreadLogRoute.Backup>() == true },
+            selected = currentDestination?.hasRoute<ThreadLogRoute.Backup>() == true,
         ),
     )
 
-    val showBottomBar = topLevelDestinations.any { it.matches(currentDestination) }
+    fun openDrawer() {
+        scope.launch { drawerState.open() }
+    }
+
+    fun closeDrawer() {
+        scope.launch { drawerState.close() }
+    }
 
     fun navigateToTab(route: ThreadLogRoute) {
         navController.navigate(route) {
@@ -96,6 +112,7 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
     }
 
     fun jumpToChat(entryId: String?, localDate: String?) {
+        activeChatFilter = ChatFeedFilter.All
         navController.navigate(
             ThreadLogRoute.Chat(
                 jumpToEntryId = entryId,
@@ -109,38 +126,56 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
         }
     }
 
-    Scaffold(
+    ModalNavigationDrawer(
         modifier = modifier.fillMaxSize(),
-        bottomBar = {
-            if (showBottomBar) {
-                NavigationBar {
-                    topLevelDestinations.forEach { dest ->
-                        NavigationBarItem(
-                            selected = dest.matches(currentDestination),
-                            onClick = { navigateToTab(dest.route) },
-                            icon = {
-                                Icon(
-                                    imageVector = dest.icon,
-                                    contentDescription = dest.label,
-                                )
-                            },
-                            label = { Text(dest.label) },
-                        )
+        drawerState = drawerState,
+        // Keep swipe-to-close always enabled; on Chat, use the dedicated left-edge strip + menu
+        // button to open so horizontal drags on message bubbles stay dedicated to swipe-to-reply.
+        gesturesEnabled = drawerState.isOpen || !isOnChatScreen,
+        drawerContent = {
+            ThreadLogDrawerSheet(
+                uiState = drawerUiState,
+                destinations = drawerDestinations,
+                activeChatFilter = activeChatFilter,
+                isChatActive = isOnChatScreen,
+                onNavigateToDestination = { route ->
+                    closeDrawer()
+                    navigateToTab(route)
+                },
+                onSelectChatFilter = { filter ->
+                    activeChatFilter = filter
+                    closeDrawer()
+                    if (!isOnChatScreen) {
+                        navigateToTab(ThreadLogRoute.Chat())
                     }
-                }
-            }
+                },
+                onSearchQueryChanged = drawerViewModel::onSearchQueryChanged,
+                onSelectCategory = drawerViewModel::onSelectCategory,
+                onToggleShowHiddenAutoTags = drawerViewModel::toggleShowHiddenAutoTags,
+                onOpenAutoTagReview = {
+                    closeDrawer()
+                    navController.navigate(ThreadLogRoute.AutoTagReview)
+                },
+                onOpenSettings = {
+                    closeDrawer()
+                    navController.navigate(ThreadLogRoute.Settings)
+                },
+                onSelectColorScheme = drawerViewModel::setColorScheme,
+                onCycleThemeMode = drawerViewModel::cycleThemeMode,
+            )
         },
-    ) { innerPadding ->
+    ) {
         NavHost(
             navController = navController,
             startDestination = ThreadLogRoute.Chat(),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+            modifier = Modifier.fillMaxSize(),
         ) {
             composable<ThreadLogRoute.Chat> { entry ->
                 val args = entry.toRoute<ThreadLogRoute.Chat>()
                 ChatScreen(
+                    activeFilter = activeChatFilter,
+                    onFilterChanged = { activeChatFilter = it },
+                    onOpenDrawer = ::openDrawer,
                     jumpToEntryId = args.jumpToEntryId,
                     jumpToLocalDate = args.jumpToLocalDate,
                     onOpenAutoTagReview = { navController.navigate(ThreadLogRoute.AutoTagReview) },
@@ -157,6 +192,7 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
                     onOpenContextWindow = { entryId ->
                         navController.navigate(ThreadLogRoute.ContextWindow(anchorEntryId = entryId))
                     },
+                    onOpenDrawer = ::openDrawer,
                 )
             }
 
@@ -168,6 +204,7 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
                     onOpenContextWindow = { entryId ->
                         navController.navigate(ThreadLogRoute.ContextWindow(anchorEntryId = entryId))
                     },
+                    onOpenDrawer = ::openDrawer,
                 )
             }
 
@@ -186,6 +223,7 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
                             ),
                         )
                     },
+                    onOpenDrawer = ::openDrawer,
                 )
             }
 
@@ -202,7 +240,7 @@ fun ThreadLogApp(modifier: Modifier = Modifier) {
             }
 
             composable<ThreadLogRoute.Backup> {
-                BackupScreen()
+                BackupScreen(onOpenDrawer = ::openDrawer)
             }
 
             composable<ThreadLogRoute.AutoTagReview> {
