@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -175,9 +174,7 @@ fun ChatScreen(
     }
 
     Scaffold(
-        modifier = modifier
-            .fillMaxSize()
-            .imePadding(),
+        modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -217,6 +214,8 @@ fun ChatScreen(
                 onRemovePendingAttachment = viewModel::removePendingAttachment,
                 onCancelReply = viewModel::cancelReply,
                 onCancelEdit = viewModel::cancelEdit,
+                onMaskCredentials = viewModel::maskCredentialsInComposer,
+                onDismissCredentialWarning = viewModel::dismissCredentialWarning,
                 onOpenQuickTagPicker = { tagPickerTarget = TagPickerTarget.Composer },
                 onSendOrSave = viewModel::sendOrSave,
             )
@@ -256,6 +255,17 @@ fun ChatScreen(
                         val currentMeta = remember(item.entry.createdAtMs, item.entry.zoneId, uiState.weekStart) {
                             viewModel.dividerMeta(item.entry.createdAtMs, item.entry.zoneId)
                         }
+                        val editedLabel = remember(
+                            item.entry.createdAtMs,
+                            item.entry.updatedAtMs,
+                            item.entry.zoneId,
+                        ) {
+                            ChatDividerLogic.formatEditedLabel(
+                                createdAtMs = item.entry.createdAtMs,
+                                updatedAtMs = item.entry.updatedAtMs,
+                                zoneId = item.entry.zoneId,
+                            )
+                        }
                         val olderMeta = remember(
                             olderItem?.entry?.createdAtMs,
                             olderItem?.entry?.zoneId,
@@ -279,6 +289,7 @@ fun ChatScreen(
                                 entryWithDetails = item,
                                 parsedMessage = parsedMessage,
                                 dateMeta = currentMeta,
+                                editedLabel = editedLabel,
                                 tagDisplayLabels = uiState.tagDisplayLabels,
                                 showHiddenAutoTags = uiState.showHiddenAutoTags,
                                 resolveAttachmentPath = viewModel::resolveAttachmentPath,
@@ -352,6 +363,9 @@ fun ChatScreen(
                 selectedTagIds = uiState.selectedTagIds.toSet(),
                 onToggleTag = { tagId, _ -> viewModel.toggleSelectedTag(tagId) },
                 onCreateTagPath = viewModel::createAndSelectTag,
+                onDeleteTag = { tagId ->
+                    viewModel.deleteTag(tagId) { onFilterChanged(ChatFeedFilter.All) }
+                },
                 onDismiss = { tagPickerTarget = null },
             )
         }
@@ -377,6 +391,9 @@ fun ChatScreen(
                 },
                 onCreateTagPath = { fullPath ->
                     viewModel.createAndAttachEntryTag(liveEntry.entry.id, fullPath)
+                },
+                onDeleteTag = { tagId ->
+                    viewModel.deleteTag(tagId) { onFilterChanged(ChatFeedFilter.All) }
                 },
                 onDismiss = { tagPickerTarget = null },
             )

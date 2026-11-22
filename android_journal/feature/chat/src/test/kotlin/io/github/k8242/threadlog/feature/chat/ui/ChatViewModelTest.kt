@@ -436,6 +436,68 @@ class ChatViewModelTest {
         assertThat(entryRepo.reactionToggles).containsExactly("e-1" to "\uD83D\uDD25")
     }
 
+    @Test
+    fun sendOrSave_blocksUnmaskedPasswordAndPin_keepsComposerText_andMasksWithXxxx() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.onComposerTextChanged("Wifi pw: Summer2026! and pin 4829", 33)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.createdCalls).isEmpty()
+        assertThat(vm.uiState.value.credentialWarning).isNotNull()
+        assertThat(vm.uiState.value.composerText).isEqualTo("Wifi pw: Summer2026! and pin 4829")
+
+        vm.maskCredentialsInComposer()
+        assertThat(vm.uiState.value.credentialWarning).isNull()
+        assertThat(vm.uiState.value.composerText).isEqualTo("Wifi pw: xxxx! and pin xxxx")
+
+        vm.sendOrSave()
+        advanceUntilIdle()
+        assertThat(entryRepo.createdCalls).hasSize(1)
+        assertThat(entryRepo.createdCalls.single().bodyRaw).isEqualTo("Wifi pw: xxxx! and pin xxxx")
+    }
+
+    @Test
+    fun sendOrSave_blocksUnmaskedPinWhenEditingExistingEntry() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.startEdit(sampleEntry("e-1", "Original note"))
+        vm.onComposerTextChanged("Gate pin: 1234", 14)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.editedCalls).isEmpty()
+        assertThat(vm.uiState.value.credentialWarning).isNotNull()
+        assertThat(vm.uiState.value.editingEntry?.entry?.id).isEqualTo("e-1")
+    }
+
+    @Test
+    fun deleteTag_removesFromRepositorySelectedTags_andResetsActiveFilter() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val filter = io.github.k8242.threadlog.core.model.ChatFeedFilter.TagSubtree(
+            tagId = lexTag.id,
+            fullPath = lexTag.fullPath,
+            displayLabel = "Lex",
+        )
+        vm.setFeedFilter(filter)
+        assertThat(vm.uiState.value.selectedTagIds).contains(lexTag.id)
+
+        var clearedCallbackInvoked = false
+        vm.deleteTag(lexTag.id) { clearedCallbackInvoked = true }
+        advanceUntilIdle()
+
+        assertThat(tagRepo.deletedTagIds).containsExactly(lexTag.id)
+        assertThat(clearedCallbackInvoked).isTrue()
+        assertThat(vm.uiState.value.activeFilter)
+            .isEqualTo(io.github.k8242.threadlog.core.model.ChatFeedFilter.All)
+        assertThat(vm.uiState.value.selectedTagIds).doesNotContain(lexTag.id)
+    }
+
     private data class CreatedCall(
         val createdId: String,
         val bodyRaw: String,
@@ -593,6 +655,7 @@ class ChatViewModelTest {
         val promotedCalls = mutableListOf<Pair<String, String>>()
         val rejectedCalls = mutableListOf<Pair<String, String>>()
         val setUserTagCalls = mutableListOf<Triple<String, String, Boolean>>()
+        val deletedTagIds = mutableListOf<String>()
 
         override fun observeAllTags(): Flow<List<Tag>> = tagsFlow
         override suspend fun getAllTags(): List<Tag> = tagsFlow.value
@@ -615,7 +678,10 @@ class ChatViewModelTest {
 
         override suspend fun renameOrMoveTag(tagId: String, newFullPath: String) = Unit
         override suspend fun updateAliases(tagId: String, aliases: List<String>) = Unit
-        override suspend fun deleteTag(tagId: String) = Unit
+        override suspend fun deleteTag(tagId: String) {
+            deletedTagIds += tagId
+            tagsFlow.value = tagsFlow.value.filterNot { it.id == tagId }
+        }
 
         override suspend fun setUserTag(entryId: String, tagId: String, attached: Boolean, nowMs: Long) {
             setUserTagCalls += Triple(entryId, tagId, attached)

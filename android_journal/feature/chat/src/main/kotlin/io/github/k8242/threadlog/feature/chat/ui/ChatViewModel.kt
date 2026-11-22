@@ -31,6 +31,9 @@ import io.github.k8242.threadlog.core.model.parser.ActiveTagTrigger
 import io.github.k8242.threadlog.core.model.parser.DateDividerMeta
 import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 import io.github.k8242.threadlog.core.model.parser.TagTriggerKind
+import io.github.k8242.threadlog.core.parser.CredentialCheckResult
+import io.github.k8242.threadlog.core.parser.SensitiveCredentialException
+import io.github.k8242.threadlog.core.parser.SensitiveCredentialGuard
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -65,6 +68,7 @@ data class ChatUiState(
     val pendingAutoTagCount: Int = 0,
     val undoDeletedEntryId: String? = null,
     val scrollToNewestEntryId: String? = null,
+    val credentialWarning: String? = null,
     val errorMessage: String? = null,
 )
 
@@ -293,13 +297,41 @@ class ChatViewModel @Inject constructor(
         val safeCursor = cursor.coerceIn(0, text.length)
         val trigger = messageParser.detectTagTrigger(text, safeCursor)
         _uiState.update { state ->
+            val nextWarning = if (state.credentialWarning != null) {
+                when (val check = SensitiveCredentialGuard.validate(text)) {
+                    CredentialCheckResult.Allowed -> null
+                    is CredentialCheckResult.Rejected -> check.message
+                }
+            } else {
+                null
+            }
             state.copy(
                 composerText = text,
                 composerCursor = safeCursor,
                 activeTagTrigger = trigger,
                 tagSuggestions = computeTagSuggestions(trigger, state.allTags),
+                credentialWarning = nextWarning,
             )
         }
+    }
+
+    fun maskCredentialsInComposer() {
+        _uiState.update { state ->
+            val masked = SensitiveCredentialGuard.maskDetectedWithXxxx(state.composerText)
+            val safeCursor = masked.length
+            val trigger = messageParser.detectTagTrigger(masked, safeCursor)
+            state.copy(
+                composerText = masked,
+                composerCursor = safeCursor,
+                activeTagTrigger = trigger,
+                tagSuggestions = computeTagSuggestions(trigger, state.allTags),
+                credentialWarning = null,
+            )
+        }
+    }
+
+    fun dismissCredentialWarning() {
+        _uiState.update { it.copy(credentialWarning = null) }
     }
 
     fun onSelectTagSuggestion(tag: Tag) {
@@ -468,6 +500,7 @@ class ChatViewModel @Inject constructor(
                 composerCursor = raw.length,
                 activeTagTrigger = null,
                 tagSuggestions = emptyList(),
+                credentialWarning = null,
             )
         }
     }
@@ -480,6 +513,7 @@ class ChatViewModel @Inject constructor(
                 composerCursor = 0,
                 activeTagTrigger = null,
                 tagSuggestions = emptyList(),
+                credentialWarning = null,
             )
         }
     }
@@ -490,6 +524,11 @@ class ChatViewModel @Inject constructor(
 
         if (editing != null) {
             if (snapshot.composerText.isBlank() && editing.attachments.isEmpty()) {
+                return
+            }
+            val check = SensitiveCredentialGuard.validate(snapshot.composerText)
+            if (check is CredentialCheckResult.Rejected) {
+                _uiState.update { it.copy(credentialWarning = check.message) }
                 return
             }
             viewModelScope.launch {
@@ -509,11 +548,14 @@ class ChatViewModel @Inject constructor(
                             composerCursor = 0,
                             activeTagTrigger = null,
                             tagSuggestions = emptyList(),
+                            credentialWarning = null,
                             errorMessage = null,
                         )
                     }
                 } catch (ce: CancellationException) {
                     throw ce
+                } catch (e: SensitiveCredentialException) {
+                    _uiState.update { it.copy(credentialWarning = e.message) }
                 } catch (e: Exception) {
                     _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update entry") }
                 }
@@ -522,6 +564,12 @@ class ChatViewModel @Inject constructor(
         }
 
         if (snapshot.composerText.isBlank() && snapshot.pendingAttachments.isEmpty()) {
+            return
+        }
+
+        val check = SensitiveCredentialGuard.validate(snapshot.composerText)
+        if (check is CredentialCheckResult.Rejected) {
+            _uiState.update { it.copy(credentialWarning = check.message) }
             return
         }
 
@@ -555,13 +603,61 @@ class ChatViewModel @Inject constructor(
                         pendingAttachments = emptyList(),
                         replyTarget = null,
                         scrollToNewestEntryId = created.entry.id,
+                        credentialWarning = null,
+                        errorMessage = null,
+                    )
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: SensitiveCredentialException) {
+                _uiState.update { it.copy(credentialWarning = e.message) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to save entry") }
+            }
+        }
+    }
+
+    fun deleteTag(
+        tagId: String,
+        onActiveFilterCleared: () -> Unit = {},
+    ) {
+        val currentState = _uiState.value
+        val targetTag = currentState.allTags.firstOrNull { it.id == tagId }
+        val deletedIds = if (targetTag != null) {
+            val prefix = "${targetTag.fullPath}/"
+            currentState.allTags
+                .filter { it.id == tagId || it.fullPath.startsWith(prefix, ignoreCase = true) }
+                .map { it.id }
+                .toSet()
+        } else {
+            setOf(tagId)
+        }
+
+        viewModelScope.launch {
+            try {
+                tagRepository.deleteTag(tagId)
+                val currentFilter = activeFilterFlow.value
+                val filterWasDeleted = currentFilter is ChatFeedFilter.TagSubtree &&
+                    (
+                        currentFilter.tagId in deletedIds ||
+                            (targetTag != null && currentFilter.fullPath.startsWith("${targetTag.fullPath}/", ignoreCase = true))
+                        )
+                if (filterWasDeleted) {
+                    autoAttachedFilterTagId = null
+                    activeFilterFlow.value = ChatFeedFilter.All
+                    onActiveFilterCleared()
+                }
+                _uiState.update { state ->
+                    state.copy(
+                        activeFilter = if (filterWasDeleted) ChatFeedFilter.All else state.activeFilter,
+                        selectedTagIds = state.selectedTagIds.filterNot { it in deletedIds },
                         errorMessage = null,
                     )
                 }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to save entry") }
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to delete tag") }
             }
         }
     }

@@ -217,6 +217,7 @@ fun MessageBubbleItem(
     entryWithDetails: EntryWithDetails,
     parsedMessage: ParsedMessage,
     dateMeta: DateDividerMeta,
+    editedLabel: String?,
     tagDisplayLabels: Map<String, String>,
     showHiddenAutoTags: Boolean,
     resolveAttachmentPath: (String) -> String,
@@ -332,7 +333,7 @@ fun MessageBubbleItem(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // Header row: Upper-left 0-based hex ordinal + timestamp (+ Edited + TODO badge) & overflow menu
+                    // Header row: Upper-left 0-based hex ordinal + timestamp (+ Edited timestamp + TODO badge) & overflow menu
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
@@ -341,9 +342,10 @@ fun MessageBubbleItem(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                            FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                itemVerticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
                                     text = hexOrdinal,
@@ -362,21 +364,20 @@ fun MessageBubbleItem(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                if (entry.isEdited) {
+                                if (editedLabel != null) {
                                     Text(
                                         text = "\u00B7",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Text(
-                                        text = "Edited",
+                                        text = editedLabel,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontStyle = FontStyle.Italic,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 if (isTask) {
-                                    Spacer(modifier = Modifier.width(2.dp))
                                     Surface(
                                         color = if (isTaskDone) {
                                             MaterialTheme.colorScheme.surfaceContainerHigh

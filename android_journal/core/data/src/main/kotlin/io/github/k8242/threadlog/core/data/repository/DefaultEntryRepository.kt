@@ -35,6 +35,7 @@ import io.github.k8242.threadlog.core.model.contract.DateWeekCalculator
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
 import io.github.k8242.threadlog.core.model.contract.MessageParser
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
+import io.github.k8242.threadlog.core.parser.SensitiveCredentialGuard
 import io.github.k8242.threadlog.core.parser.UuidV7
 import java.time.ZoneId
 import java.util.Locale
@@ -125,6 +126,7 @@ class DefaultEntryRepository @Inject constructor(
         zoneId: String?,
         taskStatus: TaskStatus,
     ): EntryWithDetails {
+        SensitiveCredentialGuard.requireAllowed(bodyRaw)
         val resolvedZoneId = zoneId?.takeIf { it.isNotBlank() } ?: ZoneId.systemDefault().id
         val (localDate, isoWeek) = dateWeekCalculator.localDateAndIsoWeek(nowMs, resolvedZoneId)
         val parsed = messageParser.parse(bodyRaw)
@@ -223,8 +225,9 @@ class DefaultEntryRepository @Inject constructor(
         entryId: String,
         newBodyRaw: String,
         nowMs: Long,
-    ): EntryWithDetails =
-        database.inWriteTransaction {
+    ): EntryWithDetails {
+        SensitiveCredentialGuard.requireAllowed(newBodyRaw)
+        return database.inWriteTransaction {
             val existing = entryDao.getById(entryId)
                 ?: throw NoSuchElementException("Entry not found: $entryId")
 
@@ -289,6 +292,7 @@ class DefaultEntryRepository @Inject constructor(
 
             hydrator.hydrateEntry(hashedEntity)
         }
+    }
 
     override suspend fun setTaskStatus(
         entryId: String,
@@ -325,11 +329,11 @@ class DefaultEntryRepository @Inject constructor(
             } else {
                 current + cleaned
             }
-            val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
+            // Emoji reactions intentionally preserve existing.updatedAtMs so they never mark
+            // a note as Edited or alter its edited timestamp.
             entryDao.update(
                 existing.copy(
                     reactionsJson = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec.encode(updated),
-                    updatedAtMs = updatedAtMs,
                 ),
             )
             hydrator.recomputeAndPersistContentHash(entryId)

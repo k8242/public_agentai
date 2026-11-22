@@ -192,11 +192,58 @@ class TaskAndDrawerRepositoryTest {
         val afterAdd = graph.entryRepository.getEntry(created.entry.id)!!
         assertThat(afterAdd.entry.reactions).containsExactly("\uD83D\uDD25", "\uD83D\uDC4D").inOrder()
         assertThat(afterAdd.entry.contentHash).isNotEqualTo(initialHash)
+        assertThat(afterAdd.entry.updatedAtMs).isNull()
+        assertThat(afterAdd.entry.isEdited).isFalse()
 
-        // Toggling an existing reaction removes it.
+        // Toggling an existing reaction removes it and still leaves updatedAtMs untouched.
         graph.entryRepository.toggleReaction(created.entry.id, "\uD83D\uDD25", nowMs = 1_763_600_300_000L)
         val afterRemove = graph.entryRepository.getEntry(created.entry.id)!!
         assertThat(afterRemove.entry.reactions).containsExactly("\uD83D\uDC4D")
+        assertThat(afterRemove.entry.updatedAtMs).isNull()
+
+        // After a TODO toggle sets updatedAtMs, adding a reaction must preserve that exact timestamp.
+        graph.entryRepository.setTaskStatus(created.entry.id, TaskStatus.TODO, nowMs = 1_763_600_400_000L)
+        val afterTaskToggle = graph.entryRepository.getEntry(created.entry.id)!!
+        assertThat(afterTaskToggle.entry.updatedAtMs).isEqualTo(1_763_600_400_000L)
+        graph.entryRepository.toggleReaction(created.entry.id, "\u2764\uFE0F", nowMs = 1_763_600_500_000L)
+        val afterSecondReaction = graph.entryRepository.getEntry(created.entry.id)!!
+        assertThat(afterSecondReaction.entry.updatedAtMs).isEqualTo(1_763_600_400_000L)
+    }
+
+    @Test
+    fun createAndEditEntry_rejectUnmaskedPasswordsAndPins_allowXxxxAndPwd() = runTest {
+        var createBlocked = false
+        try {
+            graph.entryRepository.createEntry(
+                bodyRaw = "Wifi pw: Summer2026!",
+                userTagIds = emptyList(),
+                nowMs = 1_763_600_000_000L,
+                zoneId = "UTC",
+            )
+        } catch (_: io.github.k8242.threadlog.core.parser.SensitiveCredentialException) {
+            createBlocked = true
+        }
+        assertThat(createBlocked).isTrue()
+
+        val allowed = graph.entryRepository.createEntry(
+            bodyRaw = "Wifi pw: xxxx, ran pwd /home/user",
+            userTagIds = emptyList(),
+            nowMs = 1_763_600_000_000L,
+            zoneId = "UTC",
+        )
+        assertThat(allowed.entry.bodyRaw).contains("xxxx")
+
+        var editBlocked = false
+        try {
+            graph.entryRepository.editEntry(
+                entryId = allowed.entry.id,
+                newBodyRaw = "ATM pin is 4829",
+                nowMs = 1_763_600_100_000L,
+            )
+        } catch (_: io.github.k8242.threadlog.core.parser.SensitiveCredentialException) {
+            editBlocked = true
+        }
+        assertThat(editBlocked).isTrue()
     }
 
     @Test

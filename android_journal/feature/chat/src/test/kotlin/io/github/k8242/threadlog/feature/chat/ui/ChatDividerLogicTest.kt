@@ -170,4 +170,29 @@ class ChatDividerLogicTest {
             DividerVisibility(showYear = true, showMonth = true, showWeek = true, showDay = true),
         )
     }
+
+    @Test
+    fun `formatEditedLabel returns null when unedited or not newer than creation`() {
+        val created = epochMs(2026, 11, 22, 19, 40)
+        assertThat(ChatDividerLogic.formatEditedLabel(created, null, zone)).isNull()
+        assertThat(ChatDividerLogic.formatEditedLabel(created, created, zone)).isNull()
+        assertThat(ChatDividerLogic.formatEditedLabel(created, created - 1_000L, zone)).isNull()
+    }
+
+    @Test
+    fun `formatEditedLabel formats same-day cross-day and cross-year timestamps`() {
+        val created = epochMs(2026, 11, 22, 19, 40)
+
+        val sameDayEdit = epochMs(2026, 11, 22, 20, 5)
+        assertThat(ChatDividerLogic.formatEditedLabel(created, sameDayEdit, zone))
+            .isEqualTo("Edited 8:05 PM")
+
+        val nextDaySameYearEdit = epochMs(2026, 11, 23, 9, 12)
+        assertThat(ChatDividerLogic.formatEditedLabel(created, nextDaySameYearEdit, zone))
+            .isEqualTo("Edited Nov 23, 9:12 AM")
+
+        val nextYearEdit = epochMs(2027, 1, 3, 9, 12)
+        assertThat(ChatDividerLogic.formatEditedLabel(created, nextYearEdit, zone))
+            .isEqualTo("Edited Jan 3, 2027, 9:12 AM")
+    }
 }

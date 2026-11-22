@@ -4,23 +4,29 @@
 package io.github.k8242.threadlog.app.ui.drawer
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -37,6 +43,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.LightMode
@@ -47,6 +54,7 @@ import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FilterChip
@@ -57,7 +65,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,8 +117,11 @@ fun ThreadLogDrawerSheet(
     onOpenSettings: () -> Unit,
     onSelectColorScheme: (AppColorScheme) -> Unit,
     onCycleThemeMode: () -> Unit,
+    onDeleteTag: (DrawerTagSummary) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var pendingDeleteSummary by remember { mutableStateOf<DrawerTagSummary?>(null) }
+
     ModalDrawerSheet(
         modifier = modifier
             .width(316.dp)
@@ -116,7 +132,7 @@ fun ThreadLogDrawerSheet(
             modifier = Modifier
                 .fillMaxHeight()
                 .statusBarsPadding()
-                .navigationBarsPadding(),
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
         ) {
             // 1. Header bar (replaces top app bar actions)
             Row(
@@ -348,6 +364,8 @@ fun ThreadLogDrawerSheet(
                                     ),
                                 )
                             },
+                            onLongClick = { pendingDeleteSummary = summary },
+                            onDeleteClick = { pendingDeleteSummary = summary },
                         )
                     }
                 }
@@ -363,6 +381,48 @@ fun ThreadLogDrawerSheet(
                 onCycleThemeMode = onCycleThemeMode,
             )
         }
+    }
+
+    pendingDeleteSummary?.let { target ->
+        val displayLabel = uiState.tagDisplayLabels[target.tag.id] ?: target.tag.leafName
+        val childCount = remember(uiState.allTagSummaries, target) {
+            val prefix = "${target.tag.fullPath}/"
+            uiState.allTagSummaries.count { it.tag.fullPath.startsWith(prefix, ignoreCase = true) }
+        }
+        val notesPart = if (target.entryCount > 0) {
+            " Currently attached to ${target.entryCount} note${if (target.entryCount == 1) "" else "s"}."
+        } else {
+            ""
+        }
+        val childPart = if (childCount > 0) {
+            " This will also delete $childCount sub-tag${if (childCount == 1) "" else "s"}."
+        } else {
+            ""
+        }
+        AlertDialog(
+            onDismissRequest = { pendingDeleteSummary = null },
+            title = { Text("Delete tag \"$displayLabel\"?") },
+            text = {
+                Text(
+                    "Remove \"${target.tag.fullPath}\" from your tag list?$notesPart$childPart Your journal notes will not be deleted.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteTag(target)
+                        pendingDeleteSummary = null
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteSummary = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 
@@ -469,6 +529,7 @@ private fun DrawerSearchField(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DrawerConversationRow(
     title: String,
@@ -482,6 +543,8 @@ private fun DrawerConversationRow(
     avatarText: String?,
     onClick: () -> Unit,
     openTodoCount: Int = 0,
+    onLongClick: (() -> Unit)? = null,
+    onDeleteClick: (() -> Unit)? = null,
 ) {
     val rowBg = if (selected) {
         MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
@@ -495,7 +558,10 @@ private fun DrawerConversationRow(
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(rowBg)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -579,6 +645,19 @@ private fun DrawerConversationRow(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            if (onDeleteClick != null) {
+                IconButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "Delete $title",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }

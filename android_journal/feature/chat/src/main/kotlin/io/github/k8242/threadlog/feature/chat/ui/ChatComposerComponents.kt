@@ -23,13 +23,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -43,9 +47,12 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -59,6 +66,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -99,6 +107,8 @@ fun ChatComposer(
     onRemovePendingAttachment: (String) -> Unit,
     onCancelReply: () -> Unit,
     onCancelEdit: () -> Unit,
+    onMaskCredentials: () -> Unit,
+    onDismissCredentialWarning: () -> Unit,
     onOpenQuickTagPicker: () -> Unit,
     onSendOrSave: () -> Unit,
     modifier: Modifier = Modifier,
@@ -170,8 +180,17 @@ fun ChatComposer(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding(),
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
         ) {
+            // Credential guard warning banner (blocks unmasked passwords/PINs; offers 1-tap xxxx masking)
+            uiState.credentialWarning?.let { warning ->
+                CredentialWarningBanner(
+                    message = warning,
+                    onMaskWithXxxx = onMaskCredentials,
+                    onDismiss = onDismissCredentialWarning,
+                )
+            }
+
             // Live @/#/+ autocomplete suggestions overlay
             val activeTrigger = uiState.activeTagTrigger
             val trimmedTriggerQuery = activeTrigger?.query?.trim()?.trim('/').orEmpty()
@@ -582,9 +601,64 @@ private fun PendingAttachmentStrip(
     }
 }
 
+@Composable
+private fun CredentialWarningBanner(
+    message: String,
+    onMaskWithXxxx: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = onMaskWithXxxx,
+            ) {
+                Text(
+                    text = "Mask xxxx",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Dismiss warning",
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
 /**
  * Modal bottom sheet for browsing all hierarchical tags grouped by [TagRootCategory],
- * toggling tags for either the composer or an existing entry, and creating new tag paths.
+ * toggling tags for either the composer or an existing entry, creating new tag paths,
+ * and deleting tags (without deleting notes).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -595,10 +669,13 @@ fun QuickTagPickerSheet(
     selectedTagIds: Set<String>,
     onToggleTag: (tagId: String, currentlySelected: Boolean) -> Unit,
     onCreateTagPath: (fullPath: String) -> Unit,
+    onDeleteTag: (tagId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var newTagPath by remember { mutableStateOf("") }
+    var deleteMode by remember { mutableStateOf(false) }
+    var pendingDeleteTag by remember { mutableStateOf<Tag?>(null) }
 
     val groupedTags = remember(allTags) {
         allTags
@@ -617,11 +694,37 @@ fun QuickTagPickerSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (allTags.isNotEmpty()) {
+                    TextButton(onClick = { deleteMode = !deleteMode }) {
+                        Text(
+                            text = if (deleteMode) "Done" else "Delete tags",
+                            color = if (deleteMode) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                }
+            }
+
+            if (deleteMode) {
+                Text(
+                    text = "Tap any tag below to delete it. Your journal notes will not be deleted.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
 
             // Create new hierarchical tag path
             Row(
@@ -682,11 +785,27 @@ fun QuickTagPickerSheet(
                                     tags.sortedBy { it.leafName.lowercase() }.forEach { tag ->
                                         val isSelected = tag.id in selectedTagIds
                                         val label = tagDisplayLabels[tag.id] ?: tag.leafName
-                                        FilterChip(
-                                            selected = isSelected,
-                                            onClick = { onToggleTag(tag.id, isSelected) },
-                                            label = { Text(label) },
-                                        )
+                                        if (deleteMode) {
+                                            InputChip(
+                                                selected = false,
+                                                onClick = { pendingDeleteTag = tag },
+                                                label = { Text(label) },
+                                                trailingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Delete,
+                                                        contentDescription = "Delete tag $label",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                },
+                                            )
+                                        } else {
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = { onToggleTag(tag.id, isSelected) },
+                                                label = { Text(label) },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -697,6 +816,43 @@ fun QuickTagPickerSheet(
 
             Spacer(modifier = Modifier.height(4.dp))
         }
+    }
+
+    pendingDeleteTag?.let { target ->
+        val label = tagDisplayLabels[target.id] ?: target.leafName
+        val childCount = remember(allTags, target) {
+            val prefix = "${target.fullPath}/"
+            allTags.count { it.fullPath.startsWith(prefix, ignoreCase = true) }
+        }
+        val childNote = if (childCount > 0) {
+            " This will also delete $childCount sub-tag${if (childCount == 1) "" else "s"}."
+        } else {
+            ""
+        }
+        AlertDialog(
+            onDismissRequest = { pendingDeleteTag = null },
+            title = { Text("Delete tag \"$label\"?") },
+            text = {
+                Text(
+                    "Remove \"${target.fullPath}\" from your tag list and detach it from existing notes?$childNote Notes will not be deleted.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteTag(target.id)
+                        pendingDeleteTag = null
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteTag = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

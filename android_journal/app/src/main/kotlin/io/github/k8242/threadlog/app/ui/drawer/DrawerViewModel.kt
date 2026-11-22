@@ -14,7 +14,9 @@ import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
 import io.github.k8242.threadlog.core.model.contract.LeafDisambiguator
 import io.github.k8242.threadlog.core.model.contract.SettingsRepository
+import io.github.k8242.threadlog.core.model.contract.TagRepository
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +70,7 @@ data class DrawerUiState(
 @HiltViewModel
 class DrawerViewModel @Inject constructor(
     private val entryRepository: EntryRepository,
+    private val tagRepository: TagRepository,
     private val settingsRepository: SettingsRepository,
     private val leafDisambiguator: LeafDisambiguator,
 ) : ViewModel() {
@@ -156,6 +159,18 @@ class DrawerViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.setThemeMode(next)
+        }
+    }
+
+    fun deleteTag(tagId: String) {
+        viewModelScope.launch {
+            try {
+                tagRepository.deleteTag(tagId)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Keep drawer state resilient if tag was already removed concurrently.
+            }
         }
     }
 }

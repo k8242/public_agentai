@@ -162,6 +162,20 @@ fun ThreadLogApp(
                 },
                 onSelectColorScheme = drawerViewModel::setColorScheme,
                 onCycleThemeMode = drawerViewModel::cycleThemeMode,
+                onDeleteTag = { summary ->
+                    val current = activeChatFilter
+                    if (current is ChatFeedFilter.TagSubtree) {
+                        val prefix = "${summary.tag.fullPath}/"
+                        if (
+                            current.tagId == summary.tag.id ||
+                            current.fullPath.equals(summary.tag.fullPath, ignoreCase = true) ||
+                            current.fullPath.startsWith(prefix, ignoreCase = true)
+                        ) {
+                            activeChatFilter = ChatFeedFilter.All
+                        }
+                    }
+                    drawerViewModel.deleteTag(summary.tag.id)
+                },
             )
         },
     ) {
