@@ -53,6 +53,9 @@ data class ChatUiState(
     val composerText: String = "",
     val composerCursor: Int = 0,
     val composerIsTask: Boolean = false,
+    val composerCustomTimestampMs: Long? = null,
+    val composerCustomZoneId: String? = null,
+    val keepBackdateAfterSend: Boolean = false,
     val activeTagTrigger: ActiveTagTrigger? = null,
     val tagSuggestions: List<Tag> = emptyList(),
     val selectedTagIds: List<String> = emptyList(),
@@ -216,6 +219,30 @@ class ChatViewModel @Inject constructor(
 
     fun toggleComposerTask() {
         _uiState.update { it.copy(composerIsTask = !it.composerIsTask) }
+    }
+
+    fun setComposerBackdate(
+        epochMs: Long,
+        zoneId: String,
+        keepAfterSend: Boolean,
+    ) {
+        _uiState.update {
+            it.copy(
+                composerCustomTimestampMs = epochMs,
+                composerCustomZoneId = zoneId,
+                keepBackdateAfterSend = keepAfterSend,
+            )
+        }
+    }
+
+    fun clearComposerBackdate() {
+        _uiState.update {
+            it.copy(
+                composerCustomTimestampMs = null,
+                composerCustomZoneId = null,
+                keepBackdateAfterSend = false,
+            )
+        }
     }
 
     fun consumeScrollToNewest(entryId: String) {
@@ -576,11 +603,14 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val taskStatus = if (snapshot.composerIsTask) TaskStatus.TODO else TaskStatus.NONE
+                val entryTimestampMs = snapshot.composerCustomTimestampMs ?: System.currentTimeMillis()
                 val created = entryRepository.createEntry(
                     bodyRaw = snapshot.composerText,
                     userTagIds = snapshot.selectedTagIds,
                     replyToId = snapshot.replyTarget?.entry?.id,
                     pendingAttachments = snapshot.pendingAttachments,
+                    nowMs = entryTimestampMs,
+                    zoneId = snapshot.composerCustomZoneId,
                     taskStatus = taskStatus,
                 )
                 autoTagScheduler.enqueueAutoTag(created.entry.id)
@@ -593,10 +623,18 @@ class ChatViewModel @Inject constructor(
                         else -> emptyList()
                     }
                     val defaultIsTaskForFilter = state.activeFilter is ChatFeedFilter.Todos
+                    val nextCustomTs = if (state.keepBackdateAfterSend && state.composerCustomTimestampMs != null) {
+                        state.composerCustomTimestampMs + 60_000L
+                    } else {
+                        null
+                    }
+                    val nextCustomZone = if (nextCustomTs != null) state.composerCustomZoneId else null
                     state.copy(
                         composerText = "",
                         composerCursor = 0,
                         composerIsTask = defaultIsTaskForFilter,
+                        composerCustomTimestampMs = nextCustomTs,
+                        composerCustomZoneId = nextCustomZone,
                         activeTagTrigger = null,
                         tagSuggestions = emptyList(),
                         selectedTagIds = defaultTagsForFilter,

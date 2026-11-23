@@ -498,6 +498,44 @@ class ChatViewModelTest {
         assertThat(vm.uiState.value.selectedTagIds).doesNotContain(lexTag.id)
     }
 
+    @Test
+    fun composerBackdate_passesCustomTimestampAndZone_andKeepAdvancesByOneMinute() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val pastMs = 1_660_425_060_000L // 2022-08-13T14:11:00-07:00
+        vm.setComposerBackdate(
+            epochMs = pastMs,
+            zoneId = "Pacific/Honolulu",
+            keepAfterSend = true,
+        )
+        vm.onComposerTextChanged("Backdated entry 1", 17)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.createdCalls).hasSize(1)
+        assertThat(entryRepo.createdCalls[0].nowMs).isEqualTo(pastMs)
+        assertThat(entryRepo.createdCalls[0].zoneId).isEqualTo("Pacific/Honolulu")
+        // Keep-after-send advances by +1 minute for consecutive entries.
+        assertThat(vm.uiState.value.composerCustomTimestampMs).isEqualTo(pastMs + 60_000L)
+        assertThat(vm.uiState.value.composerCustomZoneId).isEqualTo("Pacific/Honolulu")
+
+        // Sending without keep clears backdate back to Now.
+        vm.setComposerBackdate(
+            epochMs = pastMs + 120_000L,
+            zoneId = "America/Los_Angeles",
+            keepAfterSend = false,
+        )
+        vm.onComposerTextChanged("Backdated entry 2", 17)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.createdCalls[1].nowMs).isEqualTo(pastMs + 120_000L)
+        assertThat(entryRepo.createdCalls[1].zoneId).isEqualTo("America/Los_Angeles")
+        assertThat(vm.uiState.value.composerCustomTimestampMs).isNull()
+        assertThat(vm.uiState.value.composerCustomZoneId).isNull()
+    }
+
     private data class CreatedCall(
         val createdId: String,
         val bodyRaw: String,
@@ -506,6 +544,8 @@ class ChatViewModelTest {
         val attachments: List<PendingAttachment>,
         val taskStatus: io.github.k8242.threadlog.core.model.TaskStatus =
             io.github.k8242.threadlog.core.model.TaskStatus.NONE,
+        val nowMs: Long = 0L,
+        val zoneId: String? = null,
     )
 
     private class FakeEntryRepository : EntryRepository {
@@ -534,7 +574,16 @@ class ChatViewModelTest {
             taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
         ): EntryWithDetails {
             val id = "created-${nextSeq++}"
-            createdCalls += CreatedCall(id, bodyRaw, userTagIds, replyToId, pendingAttachments, taskStatus)
+            createdCalls += CreatedCall(
+                createdId = id,
+                bodyRaw = bodyRaw,
+                userTagIds = userTagIds,
+                replyToId = replyToId,
+                attachments = pendingAttachments,
+                taskStatus = taskStatus,
+                nowMs = nowMs,
+                zoneId = zoneId,
+            )
             val bookmarks = if (bodyRaw.contains("http")) {
                 listOf(
                     Bookmark(

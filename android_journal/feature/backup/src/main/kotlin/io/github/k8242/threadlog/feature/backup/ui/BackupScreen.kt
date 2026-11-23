@@ -65,6 +65,7 @@ import io.github.k8242.threadlog.core.model.ConflictResolution
 import io.github.k8242.threadlog.core.model.EntryDiffItem
 import io.github.k8242.threadlog.core.model.SyncDiffPreview
 import io.github.k8242.threadlog.core.model.contract.GoogleAuthState
+import io.github.k8242.threadlog.core.parser.WhatsAppDateOrder
 
 @Composable
 fun BackupScreen(
@@ -77,6 +78,7 @@ fun BackupScreen(
     val contentResolver = context.contentResolver
 
     var pendingImportFormat by remember { mutableStateOf<BackupFormat?>(null) }
+    var showWhatsAppPasteDialog by remember { mutableStateOf(false) }
 
     val exportCsvLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(MIME_CSV),
@@ -112,6 +114,14 @@ fun BackupScreen(
         }
     }
 
+    val importWhatsAppLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.startWhatsAppImportFromUri(uri, contentResolver)
+        }
+    }
+
     BackupScreen(
         uiState = uiState,
         onExportFormat = { format ->
@@ -132,6 +142,20 @@ fun BackupScreen(
             }
             importDocumentLauncher.launch(mimeTypes)
         },
+        onOpenWhatsAppPaste = { showWhatsAppPasteDialog = true },
+        onImportWhatsAppTxt = { importWhatsAppLauncher.launch(arrayOf("text/plain", "*/*")) },
+        onUpdateWhatsAppZone = viewModel::updateWhatsAppZoneId,
+        onUpdateWhatsAppDateOrder = viewModel::updateWhatsAppDateOrder,
+        onToggleWhatsAppIncludeSender = viewModel::toggleWhatsAppIncludeSender,
+        onToggleWhatsAppSkipMedia = viewModel::toggleWhatsAppSkipMediaOmitted,
+        onToggleWhatsAppItemSelected = viewModel::toggleWhatsAppItemSelected,
+        onSetAllWhatsAppSelected = viewModel::setAllWhatsAppItemsSelected,
+        onToggleWhatsAppItemTask = viewModel::toggleWhatsAppItemTask,
+        onUpdateWhatsAppItemBody = viewModel::updateWhatsAppItemBody,
+        onMaskWhatsAppItemCredentials = viewModel::maskWhatsAppItemCredentials,
+        onMaskAllWhatsAppCredentials = viewModel::maskAllWhatsAppCredentials,
+        onConfirmWhatsAppImport = viewModel::confirmWhatsAppImport,
+        onDismissWhatsAppImport = viewModel::dismissWhatsAppImport,
         onPushCloudBackup = viewModel::pushToGoogleSheets,
         onPullCloudPreview = viewModel::previewGoogleSheetsPull,
         onUpdateCadence = viewModel::updateCadence,
@@ -143,6 +167,16 @@ fun BackupScreen(
         onOpenDrawer = onOpenDrawer,
         modifier = modifier,
     )
+
+    if (showWhatsAppPasteDialog) {
+        WhatsAppPasteDialog(
+            onParseText = { pasted ->
+                showWhatsAppPasteDialog = false
+                viewModel.startWhatsAppImportFromText(pasted)
+            },
+            onDismiss = { showWhatsAppPasteDialog = false },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -151,6 +185,20 @@ fun BackupScreen(
     uiState: BackupUiState,
     onExportFormat: (BackupFormat) -> Unit,
     onImportFormat: (BackupFormat) -> Unit,
+    onOpenWhatsAppPaste: () -> Unit = {},
+    onImportWhatsAppTxt: () -> Unit = {},
+    onUpdateWhatsAppZone: (String) -> Unit = {},
+    onUpdateWhatsAppDateOrder: (WhatsAppDateOrder) -> Unit = {},
+    onToggleWhatsAppIncludeSender: (Boolean) -> Unit = {},
+    onToggleWhatsAppSkipMedia: (Boolean) -> Unit = {},
+    onToggleWhatsAppItemSelected: (Int) -> Unit = {},
+    onSetAllWhatsAppSelected: (Boolean) -> Unit = {},
+    onToggleWhatsAppItemTask: (Int) -> Unit = {},
+    onUpdateWhatsAppItemBody: (Int, String) -> Unit = { _, _ -> },
+    onMaskWhatsAppItemCredentials: (Int) -> Unit = {},
+    onMaskAllWhatsAppCredentials: () -> Unit = {},
+    onConfirmWhatsAppImport: () -> Unit = {},
+    onDismissWhatsAppImport: () -> Unit = {},
     onPushCloudBackup: () -> Unit,
     onPullCloudPreview: () -> Unit,
     onUpdateCadence: (BackupCadence) -> Unit,
@@ -188,42 +236,68 @@ fun BackupScreen(
         ) {
             if (uiState.isBusy) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
+            }
 
-        uiState.errorMessage?.let { error ->
-            StatusBanner(
-                message = error,
-                isError = true,
-                onDismiss = onClearMessages,
-            )
-        }
+            uiState.errorMessage?.let { error ->
+                StatusBanner(
+                    message = error,
+                    isError = true,
+                    onDismiss = onClearMessages,
+                )
+            }
 
-        uiState.statusMessage?.let { status ->
-            StatusBanner(
-                message = status,
-                isError = false,
-                onDismiss = onClearMessages,
-            )
-        }
+            uiState.statusMessage?.let { status ->
+                StatusBanner(
+                    message = status,
+                    isError = false,
+                    onDismiss = onClearMessages,
+                )
+            }
 
-        // Mandatory Dry-Run Diff & Conflict Resolution Preview section whenever a pull/import is staged.
-        uiState.pendingDiff?.let { diff ->
-            DryRunDiffPreviewCard(
-                diff = diff,
-                conflictResolutions = uiState.conflictResolutions,
+            // Interactive WhatsApp import review card when staged.
+            uiState.whatsAppDraft?.let { draft ->
+                WhatsAppReviewCard(
+                    draft = draft,
+                    isBusy = uiState.isBusy,
+                    onUpdateZoneId = onUpdateWhatsAppZone,
+                    onUpdateDateOrder = onUpdateWhatsAppDateOrder,
+                    onToggleIncludeSender = onToggleWhatsAppIncludeSender,
+                    onToggleSkipMediaOmitted = onToggleWhatsAppSkipMedia,
+                    onToggleItemSelected = onToggleWhatsAppItemSelected,
+                    onSetAllSelected = onSetAllWhatsAppSelected,
+                    onToggleItemTask = onToggleWhatsAppItemTask,
+                    onUpdateItemBody = onUpdateWhatsAppItemBody,
+                    onMaskItemCredentials = onMaskWhatsAppItemCredentials,
+                    onMaskAllCredentials = onMaskAllWhatsAppCredentials,
+                    onConfirmImport = onConfirmWhatsAppImport,
+                    onCancel = onDismissWhatsAppImport,
+                )
+            }
+
+            // Mandatory Dry-Run Diff & Conflict Resolution Preview section whenever a pull/import is staged.
+            uiState.pendingDiff?.let { diff ->
+                DryRunDiffPreviewCard(
+                    diff = diff,
+                    conflictResolutions = uiState.conflictResolutions,
+                    isBusy = uiState.isBusy,
+                    onSetConflictResolution = onSetConflictResolution,
+                    onConfirmApply = onConfirmApplyRestore,
+                    onCancel = onDismissDiffPreview,
+                )
+            }
+
+            WhatsAppImportEntryCard(
                 isBusy = uiState.isBusy,
-                onSetConflictResolution = onSetConflictResolution,
-                onConfirmApply = onConfirmApplyRestore,
-                onCancel = onDismissDiffPreview,
+                onOpenPasteDialog = onOpenWhatsAppPaste,
+                onImportTxtFile = onImportWhatsAppTxt,
             )
-        }
 
-        OfflineBackupCard(
-            isBusy = uiState.isBusy,
-            lastExportIso = uiState.settings.lastExportIso,
-            onExportFormat = onExportFormat,
-            onImportFormat = onImportFormat,
-        )
+            OfflineBackupCard(
+                isBusy = uiState.isBusy,
+                lastExportIso = uiState.settings.lastExportIso,
+                onExportFormat = onExportFormat,
+                onImportFormat = onImportFormat,
+            )
 
             CloudSyncCard(
                 uiState = uiState,

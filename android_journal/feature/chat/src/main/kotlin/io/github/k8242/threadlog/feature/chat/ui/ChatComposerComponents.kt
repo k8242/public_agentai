@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.CheckBox
@@ -50,7 +51,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -103,6 +104,8 @@ fun ChatComposer(
     onCreateTriggeredTag: () -> Unit,
     onToggleSelectedTag: (String) -> Unit,
     onToggleComposerTask: () -> Unit,
+    onOpenBackdatePicker: () -> Unit,
+    onClearComposerBackdate: () -> Unit,
     onImageBytesReceived: (ByteArray) -> Unit,
     onRemovePendingAttachment: (String) -> Unit,
     onCancelReply: () -> Unit,
@@ -236,14 +239,45 @@ fun ChatComposer(
                 )
             }
 
-            // Selected tags & TODO mode strip
-            if ((uiState.selectedTagIds.isNotEmpty() || uiState.composerIsTask) && uiState.editingEntry == null) {
+            // Selected tags, backdate & TODO mode strip
+            if (
+                (uiState.selectedTagIds.isNotEmpty() || uiState.composerIsTask || uiState.composerCustomTimestampMs != null) &&
+                uiState.editingEntry == null
+            ) {
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    uiState.composerCustomTimestampMs?.let { customTs ->
+                        item(key = "composer_backdate_chip") {
+                            val label = remember(customTs, uiState.composerCustomZoneId) {
+                                formatBackdateChipLabel(customTs, uiState.composerCustomZoneId)
+                            }
+                            InputChip(
+                                selected = true,
+                                onClick = onOpenBackdatePicker,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Schedule,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                                label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = "Reset date to now",
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable(onClick = onClearComposerBackdate),
+                                    )
+                                },
+                            )
+                        }
+                    }
                     if (uiState.composerIsTask) {
                         item(key = "composer_todo_chip") {
                             InputChip(
@@ -301,27 +335,29 @@ fun ChatComposer(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                             )
                         },
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Image,
                             contentDescription = "Attach photo",
+                            modifier = Modifier.size(20.dp),
                         )
                     }
 
                     IconButton(
                         onClick = onOpenQuickTagPicker,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Label,
+                            imageVector = Icons.AutoMirrored.Outlined.Label,
                             contentDescription = "Pick tags",
+                            modifier = Modifier.size(20.dp),
                         )
                     }
 
                     IconButton(
                         onClick = onToggleComposerTask,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
                             imageVector = if (uiState.composerIsTask) {
@@ -339,6 +375,27 @@ fun ChatComposer(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onOpenBackdatePicker,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Schedule,
+                            contentDescription = if (uiState.composerCustomTimestampMs != null) {
+                                "Backdate active (tap to change date/time)"
+                            } else {
+                                "Backdate note"
+                            },
+                            tint = if (uiState.composerCustomTimestampMs != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }

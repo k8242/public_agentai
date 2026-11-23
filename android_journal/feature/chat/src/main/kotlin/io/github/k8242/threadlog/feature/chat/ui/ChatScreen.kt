@@ -94,6 +94,7 @@ fun ChatScreen(
 
     var fullscreenImagePath by remember { mutableStateOf<String?>(null) }
     var tagPickerTarget by remember { mutableStateOf<TagPickerTarget?>(null) }
+    var showBackdateDialog by remember { mutableStateOf(false) }
     var lastHandledJumpKey by remember { mutableStateOf<String?>(null) }
 
     // Sync active feed filter selected in the hidable left panel.
@@ -210,6 +211,8 @@ fun ChatScreen(
                 onCreateTriggeredTag = viewModel::createAndInsertTriggeredTag,
                 onToggleSelectedTag = viewModel::toggleSelectedTag,
                 onToggleComposerTask = viewModel::toggleComposerTask,
+                onOpenBackdatePicker = { showBackdateDialog = true },
+                onClearComposerBackdate = viewModel::clearComposerBackdate,
                 onImageBytesReceived = viewModel::onImageBytesReceived,
                 onRemovePendingAttachment = viewModel::removePendingAttachment,
                 onCancelReply = viewModel::cancelReply,
@@ -348,6 +351,24 @@ fun ChatScreen(
         FullscreenImageDialog(
             filePath = path,
             onDismiss = { fullscreenImagePath = null },
+        )
+    }
+
+    // Backdate composer dialog (date, time, timezone)
+    if (showBackdateDialog) {
+        BackdateComposerDialog(
+            initialTimestampMs = uiState.composerCustomTimestampMs,
+            initialZoneId = uiState.composerCustomZoneId,
+            initialKeepAfterSend = uiState.keepBackdateAfterSend,
+            onApply = { epochMs, zoneId, keepAfterSend ->
+                viewModel.setComposerBackdate(epochMs, zoneId, keepAfterSend)
+                showBackdateDialog = false
+            },
+            onResetToNow = {
+                viewModel.clearComposerBackdate()
+                showBackdateDialog = false
+            },
+            onDismiss = { showBackdateDialog = false },
         )
     }
 

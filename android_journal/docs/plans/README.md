@@ -19,3 +19,4 @@ Plans are organized by type using `YYYY-MM-DD-<short-slug>.md`:
 | 2026-11-22 | Feature | [Hidable Left Panel, Color Schemes, TODO Tasks, Scroll-Up & Layout](features/2026-11-22-drawer-themes-todos-layout.md) | Implemented | `76348c2` |
 | 2026-11-22 | Feature | [Emoji Reactions, Upper-Left Hex-Ordinal Timestamps & `+project` Tagging](features/2026-11-22-reactions-hex-ordinals-projects.md) | Implemented | `ab0e206` |
 | 2026-11-22 | Batch (Fix + Features) | [Keyboard Gap Fix, Tag Deletion, Edited Timestamps & Password/PIN Guard](batches/2026-11-22-keyboard-gap-tag-delete-edited-ts-cred-guard.md) | Implemented | `b75d613` |
+| 2026-11-22 | Feature | [Composer Backdating & WhatsApp Export Import](features/2026-11-22-backdate-and-whatsapp-import.md) | Implemented | *(this commit)* |
