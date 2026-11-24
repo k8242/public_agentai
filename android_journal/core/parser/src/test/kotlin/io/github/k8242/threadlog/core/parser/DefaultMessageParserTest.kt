@@ -389,5 +389,57 @@ class DefaultMessageParserTest {
             io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.PROJECT_PLUS, "journal-app"),
             io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.ALL_HASH, "ideas/ui"),
         ).inOrder()
+        assertThat(parsed.cleanedBodyRaw).isEqualTo(
+            """
+            Met on. Ideas:
+            Check `code +ignored` and https://example.com/#frag?a+b
+            ```
+            +codeblock @nobody #nope
+            ```
+            """.trimIndent(),
+        )
+    }
+
+    @Test
+    fun parse_backslashEscapedTagPrefixes_areNotTaggedAndRenderWithoutBackslash() {
+        val raw = """Email \@alice, ticket \#123, score \+5, and real @Lex! Keep `\@code` and https://a.co/\#x."""
+        val parsed = parser.parse(raw)
+
+        assertThat(parsed.inlineTags).containsExactly(
+            io.github.k8242.threadlog.core.model.parser.InlineTagToken(TagTriggerKind.PERSON_AT, "Lex"),
+        )
+        assertThat(parsed.bodyPlain).isEqualTo(
+            "Email @alice, ticket #123, score +5, and real @Lex! Keep \\@code and https://a.co/\\#x.",
+        )
+        assertThat(parsed.cleanedBodyRaw).isEqualTo(
+            "Email @alice, ticket #123, score +5, and real! Keep `\\@code` and https://a.co/\\#x.",
+        )
+        val paragraph = parsed.blocks.single() as MessageBlock.Paragraph
+        assertThat(paragraph.spans).contains(
+            InlineSpan.Text("Email @alice, ticket #123, score +5, and real @Lex! Keep "),
+        )
+        assertThat(parser.detectTagTrigger("\\@alice", 7)).isNull()
+        assertThat(parser.detectTagTrigger("\\#tag", 5)).isNull()
+        assertThat(parser.detectTagTrigger("\\+proj", 6)).isNull()
+    }
+
+    @Test
+    fun stripInlineTagsAndUnescape_dropsTagOnlyLinesAndPreservesLiteralTokensOnEdit() {
+        val (cleanedMultiline, tagsMultiline) = parser.stripInlineTagsAndUnescape(
+            "Meeting notes\n\nSecond paragraph\n#work @Lex",
+        )
+        assertThat(cleanedMultiline).isEqualTo("Meeting notes\n\nSecond paragraph")
+        assertThat(tagsMultiline.map { it.rawValue }).containsExactly("work", "Lex").inOrder()
+
+        // Edit round-trip safety: literal @alice from prior \@alice is not re-tagged when adding #followup.
+        val existingLiteralKeys = parser.extractLiteralTagTokenKeys("Email @alice about launch")
+        assertThat(existingLiteralKeys).containsExactly("@alice")
+
+        val (editedCleaned, editedNewTags) = parser.stripInlineTagsAndUnescape(
+            text = "Email @alice about the launch #followup",
+            preserveLiteralTokens = existingLiteralKeys,
+        )
+        assertThat(editedCleaned).isEqualTo("Email @alice about the launch")
+        assertThat(editedNewTags.map { it.rawValue }).containsExactly("followup")
     }
 }

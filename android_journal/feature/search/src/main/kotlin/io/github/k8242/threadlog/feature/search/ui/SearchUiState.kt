@@ -15,6 +15,7 @@ import io.github.k8242.threadlog.core.model.SearchHit
 data class SearchUiState(
     val query: String = "",
     val includeHiddenAutoTags: Boolean = true,
+    val includeArchived: Boolean = false,
     val isSearching: Boolean = false,
     val result: HybridSearchResult? = null,
     val tierAIndex: Int = 0,

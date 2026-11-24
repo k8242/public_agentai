@@ -70,9 +70,9 @@ class GoogleSheetsClient(
             // 1. Clear all three tabs so stale rows from previous exports are removed cleanly.
             val clearPayload = BatchClearRequest(
                 ranges = listOf(
-                    "${WorkbookMapper.TAB_ENTRIES}!A:L",
+                    "${WorkbookMapper.TAB_ENTRIES}!A:Q",
                     "${WorkbookMapper.TAB_TAG_TREE}!A:F",
-                    "${WorkbookMapper.TAB_SYNC_META}!A:E",
+                    "${WorkbookMapper.TAB_SYNC_META}!A:G",
                 ),
             )
             val clearUrl = normalizedBaseUrl().newBuilder()
@@ -133,9 +133,9 @@ class GoogleSheetsClient(
                 .addPathSegments("v4/spreadsheets")
                 .addPathSegment(spreadsheetId)
                 .addPathSegment("values:batchGet")
-                .addQueryParameter("ranges", "${WorkbookMapper.TAB_ENTRIES}!A1:L")
+                .addQueryParameter("ranges", "${WorkbookMapper.TAB_ENTRIES}!A1:Q")
                 .addQueryParameter("ranges", "${WorkbookMapper.TAB_TAG_TREE}!A1:F")
-                .addQueryParameter("ranges", "${WorkbookMapper.TAB_SYNC_META}!A1:E")
+                .addQueryParameter("ranges", "${WorkbookMapper.TAB_SYNC_META}!A1:G")
                 .build()
 
             val request = Request.Builder()

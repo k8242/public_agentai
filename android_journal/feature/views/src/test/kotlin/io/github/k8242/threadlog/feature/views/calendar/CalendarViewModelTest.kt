@@ -243,4 +243,61 @@ class CalendarViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `exposes openTodoCount and completedTodoCount on calendar cells and task metadata on day entries`() = runTest {
+        val openHighTodo = ViewsTestData.entryDetails(
+            id = "e-todo-high",
+            localDate = "2026-11-19",
+            hour = 9,
+            bodyPlain = "Prepare release notes",
+            taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+            isHighlighted = true,
+        )
+        val doneMedTodo = ViewsTestData.entryDetails(
+            id = "e-done-med",
+            localDate = "2026-11-19",
+            hour = 11,
+            bodyPlain = "Fix migration test",
+            taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.DONE,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.MEDIUM,
+        )
+        val regularNote = ViewsTestData.entryDetails(
+            id = "e-note",
+            localDate = "2026-11-20",
+            hour = 14,
+            bodyPlain = "Coffee walk",
+        )
+
+        val entryRepo = FakeEntryRepository().apply {
+            setEntries(listOf(openHighTodo, doneMedTodo, regularNote))
+        }
+        val viewModel = createViewModel(entryRepo = entryRepo)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            val nov19Cell = state.cells.first { it.localDateKey == "2026-11-19" }
+            assertThat(nov19Cell.entryCount).isEqualTo(2)
+            assertThat(nov19Cell.openTodoCount).isEqualTo(1)
+            assertThat(nov19Cell.completedTodoCount).isEqualTo(1)
+
+            val nov20Cell = state.cells.first { it.localDateKey == "2026-11-20" }
+            assertThat(nov20Cell.entryCount).isEqualTo(1)
+            assertThat(nov20Cell.openTodoCount).isEqualTo(0)
+            assertThat(nov20Cell.completedTodoCount).isEqualTo(0)
+
+            val firstEntry = state.entriesForSelectedDate.first { it.details.entry.id == "e-todo-high" }.details.entry
+            assertThat(firstEntry.taskStatus).isEqualTo(io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+            assertThat(firstEntry.taskPriority).isEqualTo(io.github.k8242.threadlog.core.model.TaskPriority.HIGH)
+            assertThat(firstEntry.isHighlighted).isTrue()
+
+            val secondEntry = state.entriesForSelectedDate.first { it.details.entry.id == "e-done-med" }.details.entry
+            assertThat(secondEntry.isTaskDone).isTrue()
+            assertThat(secondEntry.taskPriority).isEqualTo(io.github.k8242.threadlog.core.model.TaskPriority.MEDIUM)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 }

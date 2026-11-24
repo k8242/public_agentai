@@ -234,9 +234,20 @@ class DefaultBackupDataGateway @Inject constructor(
             ?.let { parseIsoToEpochMs(it, resolvedZone, nowMs) }
         val deletedAtMs = if (row.deleted) (updatedAtMs ?: nowMs) else null
 
-        val normalizedTaskStatus = runCatching {
-            io.github.k8242.threadlog.core.model.TaskStatus.valueOf(row.taskStatus.trim().uppercase(Locale.ROOT)).name
-        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE.name)
+        val parsedTaskStatus = runCatching {
+            io.github.k8242.threadlog.core.model.TaskStatus.valueOf(row.taskStatus.trim().uppercase(Locale.ROOT))
+        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE)
+        val parsedTaskPriority = runCatching {
+            io.github.k8242.threadlog.core.model.TaskPriority.valueOf(row.taskPriority.trim().uppercase(Locale.ROOT))
+        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskPriority.NONE)
+        val effectiveTaskPriority = if (parsedTaskStatus == io.github.k8242.threadlog.core.model.TaskStatus.NONE) {
+            io.github.k8242.threadlog.core.model.TaskPriority.NONE
+        } else {
+            parsedTaskPriority
+        }
+        val archivedAtMs = row.archivedAtIso
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseIsoToEpochMs(it, resolvedZone, nowMs) }
 
         // Insert or update entry first so foreign keys on entry_tags / bookmarks / attachments succeed.
         val placeholderEntity = EntryEntity(
@@ -251,8 +262,11 @@ class DefaultBackupDataGateway @Inject constructor(
             contentHash = "",
             updatedAtMs = updatedAtMs,
             deletedAtMs = deletedAtMs,
-            taskStatus = normalizedTaskStatus,
+            taskStatus = parsedTaskStatus.name,
             reactionsJson = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec.encode(row.reactions),
+            taskPriority = effectiveTaskPriority.name,
+            archivedAtMs = archivedAtMs,
+            isHighlighted = row.isHighlighted,
         )
         entryDao.upsert(placeholderEntity)
 

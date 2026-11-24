@@ -59,9 +59,11 @@ class SearchViewModel @Inject constructor(
         if (normalized.isEmpty() || normalized == lastInitializedQuery) return
         lastInitializedQuery = normalized
         _uiState.update { it.copy(query = normalized, errorMessage = null) }
+        val state = _uiState.value
         scheduleSearch(
             query = normalized,
-            includeHiddenAutoTags = _uiState.value.includeHiddenAutoTags,
+            includeHiddenAutoTags = state.includeHiddenAutoTags,
+            includeArchived = state.includeArchived,
             debounceMs = 0L,
         )
     }
@@ -84,9 +86,11 @@ class SearchViewModel @Inject constructor(
             return
         }
 
+        val state = _uiState.value
         scheduleSearch(
             query = trimmed,
-            includeHiddenAutoTags = _uiState.value.includeHiddenAutoTags,
+            includeHiddenAutoTags = state.includeHiddenAutoTags,
+            includeArchived = state.includeArchived,
             debounceMs = SEARCH_DEBOUNCE_MS,
         )
     }
@@ -94,9 +98,11 @@ class SearchViewModel @Inject constructor(
     /** Toggles inclusion of hidden auto-tags in search matches and re-queries immediately if active. */
     fun toggleIncludeHiddenAutoTags() {
         var nextIncludeHidden = true
+        var includeArchived = false
         var activeQuery = ""
         _uiState.update { state ->
             nextIncludeHidden = !state.includeHiddenAutoTags
+            includeArchived = state.includeArchived
             activeQuery = state.query.trim()
             state.copy(
                 includeHiddenAutoTags = nextIncludeHidden,
@@ -108,6 +114,32 @@ class SearchViewModel @Inject constructor(
             scheduleSearch(
                 query = activeQuery,
                 includeHiddenAutoTags = nextIncludeHidden,
+                includeArchived = includeArchived,
+                debounceMs = 0L,
+            )
+        }
+    }
+
+    /** Toggles inclusion of archived entries in search matches and re-queries immediately if active. */
+    fun toggleIncludeArchived() {
+        var includeHidden = true
+        var nextIncludeArchived = false
+        var activeQuery = ""
+        _uiState.update { state ->
+            includeHidden = state.includeHiddenAutoTags
+            nextIncludeArchived = !state.includeArchived
+            activeQuery = state.query.trim()
+            state.copy(
+                includeArchived = nextIncludeArchived,
+                errorMessage = null,
+            )
+        }
+
+        if (activeQuery.isNotEmpty()) {
+            scheduleSearch(
+                query = activeQuery,
+                includeHiddenAutoTags = includeHidden,
+                includeArchived = nextIncludeArchived,
                 debounceMs = 0L,
             )
         }
@@ -180,6 +212,7 @@ class SearchViewModel @Inject constructor(
     private fun scheduleSearch(
         query: String,
         includeHiddenAutoTags: Boolean,
+        includeArchived: Boolean,
         debounceMs: Long,
     ) {
         searchJob?.cancel()
@@ -192,6 +225,7 @@ class SearchViewModel @Inject constructor(
                 val result = searchRepository.search(
                     query = query,
                     includeHiddenAutoTags = includeHiddenAutoTags,
+                    includeArchived = includeArchived,
                 )
                 _uiState.update {
                     it.copy(

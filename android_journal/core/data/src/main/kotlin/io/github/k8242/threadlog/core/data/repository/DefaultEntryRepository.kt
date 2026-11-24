@@ -6,7 +6,8 @@ package io.github.k8242.threadlog.core.data.repository
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
-import androidx.paging.map
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
 import io.github.k8242.threadlog.core.data.local.ThreadLogDatabase
 import io.github.k8242.threadlog.core.data.local.dao.AttachmentDao
 import io.github.k8242.threadlog.core.data.local.dao.BookmarkDao
@@ -20,6 +21,7 @@ import io.github.k8242.threadlog.core.data.local.fts.FtsIndexManager
 import io.github.k8242.threadlog.core.data.local.inReadTransaction
 import io.github.k8242.threadlog.core.data.local.inWriteTransaction
 import io.github.k8242.threadlog.core.data.mapper.EntryContentHasher
+import io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec
 import io.github.k8242.threadlog.core.data.mapper.TagPathNormalizer
 import io.github.k8242.threadlog.core.data.mapper.toDomain
 import io.github.k8242.threadlog.core.model.CalendarDayCount
@@ -28,13 +30,21 @@ import io.github.k8242.threadlog.core.model.CompactEntrySummary
 import io.github.k8242.threadlog.core.model.DrawerOverviewSummary
 import io.github.k8242.threadlog.core.model.DrawerTagSummary
 import io.github.k8242.threadlog.core.model.EntryWithDetails
+import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
+import io.github.k8242.threadlog.core.model.TimelineDateBucket
 import io.github.k8242.threadlog.core.model.TodoFilterMode
+import io.github.k8242.threadlog.core.model.TodoSortOrder
 import io.github.k8242.threadlog.core.model.contract.DateWeekCalculator
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
 import io.github.k8242.threadlog.core.model.contract.MessageParser
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
+import io.github.k8242.threadlog.core.model.parser.InlineTagToken
+import io.github.k8242.threadlog.core.model.parser.TagTriggerKind
+import io.github.k8242.threadlog.core.parser.DefaultMessageParser
+import io.github.k8242.threadlog.core.parser.HiddenPlaceholderMatcher
 import io.github.k8242.threadlog.core.parser.SensitiveCredentialGuard
 import io.github.k8242.threadlog.core.parser.UuidV7
 import java.time.ZoneId
@@ -62,31 +72,39 @@ class DefaultEntryRepository @Inject constructor(
 ) : EntryRepository {
 
     override fun observePagedEntries(): Flow<PagingData<EntryWithDetails>> =
-        observePagedEntries(ChatFeedFilter.All)
+        observePagedEntries(filter = ChatFeedFilter.All, includeHiddenPlaceholders = false)
 
     override fun observePagedEntries(filter: ChatFeedFilter): Flow<PagingData<EntryWithDetails>> =
+        observePagedEntries(filter = filter, includeHiddenPlaceholders = false)
+
+    override fun observePagedEntries(
+        filter: ChatFeedFilter,
+        includeHiddenPlaceholders: Boolean,
+    ): Flow<PagingData<EntryWithDetails>> =
         Pager(
             config = PagingConfig(
                 pageSize = DEFAULT_PAGE_SIZE,
-                enablePlaceholders = false,
+                enablePlaceholders = true,
+                jumpThreshold = JUMP_THRESHOLD,
+                maxSize = MAX_PAGING_SIZE,
             ),
             pagingSourceFactory = {
-                when (filter) {
-                    ChatFeedFilter.All -> entryDao.pagingSource()
+                val delegate = when (filter) {
+                    ChatFeedFilter.All -> entryDao.pagingSourceAll(includeHidden = includeHiddenPlaceholders)
 
                     is ChatFeedFilter.Todos -> {
-                        val statuses = when (filter.mode) {
-                            TodoFilterMode.OPEN -> listOf(TaskStatus.TODO.name)
-                            TodoFilterMode.DONE -> listOf(TaskStatus.DONE.name)
-                            TodoFilterMode.ALL -> listOf(TaskStatus.TODO.name, TaskStatus.DONE.name)
+                        val statuses = todoStatusesForMode(filter.mode)
+                        val priority = filter.priorityFilter?.name
+                        when (filter.sortOrder) {
+                            TodoSortOrder.NEWEST -> entryDao.pagingSourceTodosByNewest(statuses, priority)
+                            TodoSortOrder.PRIORITY -> entryDao.pagingSourceTodosByPriority(statuses, priority)
                         }
-                        entryDao.pagingSourceByTaskStatuses(statuses)
                     }
 
                     is ChatFeedFilter.TagSubtree -> {
                         val normalized = TagPathNormalizer.normalize(filter.fullPath)
                         if (normalized.isEmpty()) {
-                            entryDao.pagingSource()
+                            entryDao.pagingSourceAll(includeHidden = false)
                         } else {
                             val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
                             entryDao.pagingSourceByTagPrefix(
@@ -95,13 +113,16 @@ class DefaultEntryRepository @Inject constructor(
                             )
                         }
                     }
+
+                    ChatFeedFilter.Archived -> entryDao.pagingSourceArchived()
                 }
+                BatchHydratingPagingSource(
+                    delegate = delegate,
+                    database = database,
+                    hydrator = hydrator,
+                )
             },
-        ).flow.map { pagingData ->
-            pagingData.map { entity ->
-                hydrator.hydrateEntry(entity)
-            }
-        }
+        ).flow
 
     override fun observeEntry(entryId: String): Flow<EntryWithDetails?> =
         observeHydratedTables()
@@ -125,12 +146,34 @@ class DefaultEntryRepository @Inject constructor(
         nowMs: Long,
         zoneId: String?,
         taskStatus: TaskStatus,
+    ): EntryWithDetails = createEntry(
+        bodyRaw = bodyRaw,
+        userTagIds = userTagIds,
+        replyToId = replyToId,
+        pendingAttachments = pendingAttachments,
+        nowMs = nowMs,
+        zoneId = zoneId,
+        taskStatus = taskStatus,
+        taskPriority = TaskPriority.NONE,
+    )
+
+    override suspend fun createEntry(
+        bodyRaw: String,
+        userTagIds: List<String>,
+        replyToId: String?,
+        pendingAttachments: List<PendingAttachment>,
+        nowMs: Long,
+        zoneId: String?,
+        taskStatus: TaskStatus,
+        taskPriority: TaskPriority,
     ): EntryWithDetails {
         SensitiveCredentialGuard.requireAllowed(bodyRaw)
         val resolvedZoneId = zoneId?.takeIf { it.isNotBlank() } ?: ZoneId.systemDefault().id
         val (localDate, isoWeek) = dateWeekCalculator.localDateAndIsoWeek(nowMs, resolvedZoneId)
-        val parsed = messageParser.parse(bodyRaw)
+        val (cleanedBodyRaw, inlineTags) = DefaultMessageParser.stripInlineTagsAndUnescape(bodyRaw)
+        val parsed = messageParser.parse(cleanedBodyRaw)
         val entryId = UuidV7.generate(nowMs)
+        val effectivePriority = if (taskStatus == TaskStatus.NONE) TaskPriority.NONE else taskPriority
 
         val bookmarks = parsed.extractedUrls.map { url ->
             BookmarkEntity(
@@ -159,7 +202,7 @@ class DefaultEntryRepository @Inject constructor(
         }
 
         return database.inWriteTransaction {
-            val resolvedInlineTagIds = resolveOrCreateInlineTags(parsed.inlineTags)
+            val resolvedInlineTagIds = resolveOrCreateInlineTags(inlineTags)
             val distinctTagIds = (userTagIds + resolvedInlineTagIds).distinct()
             val validTags = if (distinctTagIds.isEmpty()) {
                 emptyList()
@@ -178,7 +221,7 @@ class DefaultEntryRepository @Inject constructor(
             }
 
             val contentHash = EntryContentHasher.compute(
-                bodyRaw = bodyRaw,
+                bodyRaw = cleanedBodyRaw,
                 replyToId = replyToId,
                 isDeleted = false,
                 visibleTagPaths = validTags.map { it.fullPath },
@@ -187,6 +230,9 @@ class DefaultEntryRepository @Inject constructor(
                 bookmarkSignatures = bookmarks.map { "${it.urlRaw}|${it.title.orEmpty()}" },
                 attachmentSha256s = attachments.map { it.sha256 },
                 taskStatus = taskStatus,
+                taskPriority = effectivePriority,
+                isHighlighted = false,
+                isArchived = false,
             )
 
             val entity = EntryEntity(
@@ -195,7 +241,7 @@ class DefaultEntryRepository @Inject constructor(
                 zoneId = resolvedZoneId,
                 localDate = localDate,
                 isoWeek = isoWeek,
-                bodyRaw = bodyRaw,
+                bodyRaw = cleanedBodyRaw,
                 bodyPlain = parsed.bodyPlain,
                 replyToId = replyToId,
                 contentHash = contentHash,
@@ -203,6 +249,9 @@ class DefaultEntryRepository @Inject constructor(
                 deletedAtMs = null,
                 taskStatus = taskStatus.name,
                 reactionsJson = "[]",
+                taskPriority = effectivePriority.name,
+                archivedAtMs = null,
+                isHighlighted = false,
             )
 
             entryDao.upsert(entity)
@@ -225,17 +274,37 @@ class DefaultEntryRepository @Inject constructor(
         entryId: String,
         newBodyRaw: String,
         nowMs: Long,
+    ): EntryWithDetails = editEntry(
+        entryId = entryId,
+        newBodyRaw = newBodyRaw,
+        nowMs = nowMs,
+        addedAttachments = emptyList(),
+        removedAttachmentIds = emptySet(),
+    )
+
+    override suspend fun editEntry(
+        entryId: String,
+        newBodyRaw: String,
+        nowMs: Long,
+        addedAttachments: List<PendingAttachment>,
+        removedAttachmentIds: Set<String>,
     ): EntryWithDetails {
         SensitiveCredentialGuard.requireAllowed(newBodyRaw)
         return database.inWriteTransaction {
             val existing = entryDao.getById(entryId)
                 ?: throw NoSuchElementException("Entry not found: $entryId")
 
-            val parsed = messageParser.parse(newBodyRaw)
+            // Preserve any literal @/#/+ tokens that were already in existing.bodyRaw (e.g. from prior \@foo).
+            val preserveLiteralTokens = DefaultMessageParser.extractLiteralTagTokenKeys(existing.bodyRaw)
+            val (cleanedBodyRaw, inlineTags) = DefaultMessageParser.stripInlineTagsAndUnescape(
+                text = newBodyRaw,
+                preserveLiteralTokens = preserveLiteralTokens,
+            )
+            val parsed = messageParser.parse(cleanedBodyRaw)
             val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
 
             // Attach any newly typed inline @person / #topic / +project tags as USER tags.
-            val inlineTagIds = resolveOrCreateInlineTags(parsed.inlineTags)
+            val inlineTagIds = resolveOrCreateInlineTags(inlineTags)
             if (inlineTagIds.isNotEmpty()) {
                 val inlineEntryTags = inlineTagIds.map { tagId ->
                     EntryTagEntity(
@@ -279,9 +348,39 @@ class DefaultEntryRepository @Inject constructor(
                 bookmarkDao.upsertAll(newBookmarks)
             }
 
-            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs, taskStatus, reactionsJson.
+            // Reconcile image attachments: delete removed IDs, keep existing IDs/driveFileIds,
+            // and insert newly added attachments deduped by sha256 per entry.
+            if (removedAttachmentIds.isNotEmpty()) {
+                attachmentDao.deleteByIds(entryId, removedAttachmentIds.toList())
+            }
+            if (addedAttachments.isNotEmpty()) {
+                val remainingSha256s = attachmentDao.getForEntry(entryId)
+                    .mapTo(HashSet()) { it.sha256 }
+                val newAttachments = mutableListOf<AttachmentEntity>()
+                for (pending in addedAttachments) {
+                    if (remainingSha256s.add(pending.sha256)) {
+                        newAttachments += AttachmentEntity(
+                            id = UuidV7.generate(updatedAtMs),
+                            entryId = entryId,
+                            localFilename = pending.localFilename,
+                            mimeType = pending.mimeType,
+                            byteSize = pending.byteSize,
+                            width = pending.width,
+                            height = pending.height,
+                            sha256 = pending.sha256,
+                            driveFileId = null,
+                        )
+                    }
+                }
+                if (newAttachments.isNotEmpty()) {
+                    attachmentDao.upsertAll(newAttachments)
+                }
+            }
+
+            // Preserve original createdAtMs, zoneId, localDate, isoWeek, replyToId, deletedAtMs,
+            // taskStatus, taskPriority, isHighlighted, archivedAtMs, reactionsJson.
             val updatedEntity = existing.copy(
-                bodyRaw = newBodyRaw,
+                bodyRaw = cleanedBodyRaw,
                 bodyPlain = parsed.bodyPlain,
                 updatedAtMs = updatedAtMs,
             )
@@ -301,12 +400,116 @@ class DefaultEntryRepository @Inject constructor(
     ) {
         database.inWriteTransaction {
             val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
-            if (existing.taskStatus == taskStatus.name) return@inWriteTransaction
+            val nextPriority = if (taskStatus == TaskStatus.NONE) {
+                TaskPriority.NONE.name
+            } else {
+                existing.taskPriority
+            }
+            if (existing.taskStatus == taskStatus.name && existing.taskPriority == nextPriority) {
+                return@inWriteTransaction
+            }
             val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
             entryDao.update(
                 existing.copy(
                     taskStatus = taskStatus.name,
+                    taskPriority = nextPriority,
                     updatedAtMs = updatedAtMs,
+                ),
+            )
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
+
+    override suspend fun setTaskPriority(
+        entryId: String,
+        taskPriority: TaskPriority,
+        nowMs: Long,
+    ) {
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            val nextStatus = if (taskPriority != TaskPriority.NONE && existing.taskStatus == TaskStatus.NONE.name) {
+                TaskStatus.TODO.name
+            } else {
+                existing.taskStatus
+            }
+            if (existing.taskPriority == taskPriority.name && existing.taskStatus == nextStatus) {
+                return@inWriteTransaction
+            }
+            val updatedAtMs = maxOf(nowMs, existing.createdAtMs + 1L)
+            entryDao.update(
+                existing.copy(
+                    taskStatus = nextStatus,
+                    taskPriority = taskPriority.name,
+                    updatedAtMs = updatedAtMs,
+                ),
+            )
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
+
+    override suspend fun setHighlighted(
+        entryId: String,
+        highlighted: Boolean,
+    ) {
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            if (existing.isHighlighted == highlighted) return@inWriteTransaction
+            // Yellow highlight intentionally preserves existing.updatedAtMs so it never marks a note as Edited.
+            entryDao.update(existing.copy(isHighlighted = highlighted))
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
+
+    override suspend fun setArchived(
+        entryId: String,
+        archived: Boolean,
+        nowMs: Long,
+    ) {
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            if ((existing.archivedAtMs != null) == archived) return@inWriteTransaction
+            // Archiving/unarchiving intentionally preserves existing.updatedAtMs so it never marks a note as Edited.
+            entryDao.update(existing.copy(archivedAtMs = if (archived) nowMs else null))
+            hydrator.recomputeAndPersistContentHash(entryId)
+        }
+    }
+
+    override suspend fun updateEntryMetadata(
+        entryId: String,
+        createdAtMs: Long,
+        zoneId: String,
+        taskStatus: TaskStatus,
+        taskPriority: TaskPriority,
+        isHighlighted: Boolean,
+        archivedAtMs: Long?,
+        nowMs: Long,
+    ) {
+        val validatedZoneId = ZoneId.of(zoneId.trim()).id
+        val (localDate, isoWeek) = dateWeekCalculator.localDateAndIsoWeek(createdAtMs, validatedZoneId)
+        val effectivePriority = if (taskStatus == TaskStatus.NONE) TaskPriority.NONE else taskPriority
+
+        database.inWriteTransaction {
+            val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
+            val taskChanged = existing.taskStatus != taskStatus.name ||
+                existing.taskPriority != effectivePriority.name
+            // Preserve existing.updatedAtMs when only timestamp, timezone, highlight, or archive status changed.
+            val nextUpdatedAtMs = if (taskChanged) {
+                maxOf(nowMs, createdAtMs + 1L)
+            } else {
+                existing.updatedAtMs
+            }
+
+            entryDao.update(
+                existing.copy(
+                    createdAtMs = createdAtMs,
+                    zoneId = validatedZoneId,
+                    localDate = localDate,
+                    isoWeek = isoWeek,
+                    taskStatus = taskStatus.name,
+                    taskPriority = effectivePriority.name,
+                    isHighlighted = isHighlighted,
+                    archivedAtMs = archivedAtMs,
+                    updatedAtMs = nextUpdatedAtMs,
                 ),
             )
             hydrator.recomputeAndPersistContentHash(entryId)
@@ -322,8 +525,7 @@ class DefaultEntryRepository @Inject constructor(
         if (cleaned.isEmpty()) return
         database.inWriteTransaction {
             val existing = entryDao.getById(entryId) ?: return@inWriteTransaction
-            val current = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec
-                .decode(existing.reactionsJson)
+            val current = ReactionsJsonCodec.decode(existing.reactionsJson)
             val updated = if (cleaned in current) {
                 current.filterNot { it == cleaned }
             } else {
@@ -333,15 +535,182 @@ class DefaultEntryRepository @Inject constructor(
             // a note as Edited or alter its edited timestamp.
             entryDao.update(
                 existing.copy(
-                    reactionsJson = io.github.k8242.threadlog.core.data.mapper.ReactionsJsonCodec.encode(updated),
+                    reactionsJson = ReactionsJsonCodec.encode(updated),
                 ),
             )
             hydrator.recomputeAndPersistContentHash(entryId)
         }
     }
 
+    override suspend fun findEntryOffset(
+        entryId: String,
+        filter: ChatFeedFilter,
+        includeHiddenPlaceholders: Boolean,
+    ): Int? = database.inReadTransaction {
+        val entry = entryDao.getById(entryId) ?: return@inReadTransaction null
+        if (entry.deletedAtMs != null) return@inReadTransaction null
+
+        val isHidden = HiddenPlaceholderMatcher.isHiddenPlaceholder(entry.bodyPlain) &&
+            attachmentDao.getForEntry(entryId).isEmpty()
+
+        when (filter) {
+            ChatFeedFilter.All -> {
+                if (entry.archivedAtMs != null) return@inReadTransaction null
+                if (!includeHiddenPlaceholders && isHidden) return@inReadTransaction null
+                entryDao.countAheadAll(
+                    targetCreatedAtMs = entry.createdAtMs,
+                    targetId = entry.id,
+                    includeHidden = includeHiddenPlaceholders,
+                )
+            }
+
+            ChatFeedFilter.Archived -> {
+                if (entry.archivedAtMs == null || isHidden) return@inReadTransaction null
+                entryDao.countAheadArchived(
+                    targetCreatedAtMs = entry.createdAtMs,
+                    targetId = entry.id,
+                )
+            }
+
+            is ChatFeedFilter.Todos -> {
+                if (entry.archivedAtMs != null || isHidden) return@inReadTransaction null
+                val statuses = todoStatusesForMode(filter.mode)
+                if (entry.taskStatus !in statuses) return@inReadTransaction null
+                val priorityFilter = filter.priorityFilter?.name
+                if (priorityFilter != null && entry.taskPriority != priorityFilter) {
+                    return@inReadTransaction null
+                }
+                when (filter.sortOrder) {
+                    TodoSortOrder.NEWEST -> entryDao.countAheadTodosByNewest(
+                        statuses = statuses,
+                        priorityFilter = priorityFilter,
+                        targetCreatedAtMs = entry.createdAtMs,
+                        targetId = entry.id,
+                    )
+
+                    TodoSortOrder.PRIORITY -> {
+                        val rank = runCatching { TaskPriority.valueOf(entry.taskPriority) }
+                            .getOrDefault(TaskPriority.NONE)
+                            .sortRank
+                        entryDao.countAheadTodosByPriority(
+                            statuses = statuses,
+                            priorityFilter = priorityFilter,
+                            targetPriorityRank = rank,
+                            targetCreatedAtMs = entry.createdAtMs,
+                            targetId = entry.id,
+                        )
+                    }
+                }
+            }
+
+            is ChatFeedFilter.TagSubtree -> {
+                if (entry.archivedAtMs != null || isHidden) return@inReadTransaction null
+                val normalized = TagPathNormalizer.normalize(filter.fullPath)
+                if (normalized.isEmpty()) {
+                    entryDao.countAheadAll(
+                        targetCreatedAtMs = entry.createdAtMs,
+                        targetId = entry.id,
+                        includeHidden = false,
+                    )
+                } else {
+                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
+                    val matches = entryDao.entryMatchesTagPrefix(
+                        entryId = entry.id,
+                        exactTagPath = normalized,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                    if (!matches) return@inReadTransaction null
+                    entryDao.countAheadTagPrefix(
+                        exactTagPath = normalized,
+                        subtreeLikePattern = subtreeLike,
+                        targetCreatedAtMs = entry.createdAtMs,
+                        targetId = entry.id,
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun findDateOffset(
+        localDate: String,
+        filter: ChatFeedFilter,
+        includeHiddenPlaceholders: Boolean,
+    ): Int? = database.inReadTransaction {
+        val target = when (filter) {
+            ChatFeedFilter.All -> entryDao.getNewestEntryForDateOnOrBeforeAll(
+                localDate = localDate,
+                includeHidden = includeHiddenPlaceholders,
+            )
+
+            ChatFeedFilter.Archived -> entryDao.getNewestEntryForDateOnOrBeforeArchived(
+                localDate = localDate,
+            )
+
+            is ChatFeedFilter.Todos -> entryDao.getNewestEntryForDateOnOrBeforeTodos(
+                localDate = localDate,
+                statuses = todoStatusesForMode(filter.mode),
+                priorityFilter = filter.priorityFilter?.name,
+            )
+
+            is ChatFeedFilter.TagSubtree -> {
+                val normalized = TagPathNormalizer.normalize(filter.fullPath)
+                if (normalized.isEmpty()) {
+                    entryDao.getNewestEntryForDateOnOrBeforeAll(
+                        localDate = localDate,
+                        includeHidden = false,
+                    )
+                } else {
+                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
+                    entryDao.getNewestEntryForDateOnOrBeforeTagPrefix(
+                        localDate = localDate,
+                        exactTagPath = normalized,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                }
+            }
+        } ?: return@inReadTransaction null
+
+        findEntryOffset(
+            entryId = target.id,
+            filter = filter,
+            includeHiddenPlaceholders = includeHiddenPlaceholders,
+        )
+    }
+
+    override fun observeTimelineDateBuckets(
+        filter: ChatFeedFilter,
+        includeHiddenPlaceholders: Boolean,
+    ): Flow<List<TimelineDateBucket>> {
+        val sourceFlow = when (filter) {
+            ChatFeedFilter.All -> entryDao.observeTimelineDateBucketsAll(includeHidden = includeHiddenPlaceholders)
+
+            ChatFeedFilter.Archived -> entryDao.observeTimelineDateBucketsArchived()
+
+            is ChatFeedFilter.Todos -> entryDao.observeTimelineDateBucketsTodos(
+                statuses = todoStatusesForMode(filter.mode),
+                priorityFilter = filter.priorityFilter?.name,
+            )
+
+            is ChatFeedFilter.TagSubtree -> {
+                val normalized = TagPathNormalizer.normalize(filter.fullPath)
+                if (normalized.isEmpty()) {
+                    entryDao.observeTimelineDateBucketsAll(includeHidden = false)
+                } else {
+                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
+                    entryDao.observeTimelineDateBucketsTagPrefix(
+                        exactTagPath = normalized,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                }
+            }
+        }
+        return sourceFlow
+            .map { rows -> rows.map { TimelineDateBucket(localDate = it.localDate, entryCount = it.entryCount) } }
+            .distinctUntilChanged()
+    }
+
     private suspend fun resolveOrCreateInlineTags(
-        inlineTags: List<io.github.k8242.threadlog.core.model.parser.InlineTagToken>,
+        inlineTags: List<InlineTagToken>,
     ): List<String> {
         if (inlineTags.isEmpty()) return emptyList()
 
@@ -354,13 +723,13 @@ class DefaultEntryRepository @Inject constructor(
             val rawLower = normalizedRaw.lowercase(Locale.ROOT)
 
             when (token.kind) {
-                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PROJECT_PLUS -> {
+                TagTriggerKind.PROJECT_PLUS -> {
                     val match = if (normalizedRaw.contains('/')) {
                         val targetPath = if (rawLower.startsWith("projects/")) normalizedRaw else "projects/$normalizedRaw"
                         existingTags.firstOrNull { it.fullPath.equals(targetPath, ignoreCase = true) }
                     } else {
                         existingTags
-                            .filter { it.rootCategory == io.github.k8242.threadlog.core.model.TagRootCategory.PROJECTS }
+                            .filter { it.rootCategory == TagRootCategory.PROJECTS }
                             .firstOrNull {
                                 it.leafName.equals(normalizedRaw, ignoreCase = true) ||
                                     it.aliases.any { alias -> alias.equals(normalizedRaw, ignoreCase = true) }
@@ -374,13 +743,13 @@ class DefaultEntryRepository @Inject constructor(
                     }
                 }
 
-                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.PERSON_AT -> {
+                TagTriggerKind.PERSON_AT -> {
                     val match = if (normalizedRaw.contains('/')) {
                         val targetPath = if (rawLower.startsWith("people/")) normalizedRaw else "people/$normalizedRaw"
                         existingTags.firstOrNull { it.fullPath.equals(targetPath, ignoreCase = true) }
                     } else {
                         existingTags
-                            .filter { it.rootCategory == io.github.k8242.threadlog.core.model.TagRootCategory.PEOPLE }
+                            .filter { it.rootCategory == TagRootCategory.PEOPLE }
                             .firstOrNull {
                                 it.leafName.equals(normalizedRaw, ignoreCase = true) ||
                                     it.aliases.any { alias -> alias.equals(normalizedRaw, ignoreCase = true) }
@@ -394,7 +763,7 @@ class DefaultEntryRepository @Inject constructor(
                     }
                 }
 
-                io.github.k8242.threadlog.core.model.parser.TagTriggerKind.ALL_HASH -> {
+                TagTriggerKind.ALL_HASH -> {
                     val match = if (normalizedRaw.contains('/')) {
                         existingTags.firstOrNull { it.fullPath.equals(normalizedRaw, ignoreCase = true) }
                     } else {
@@ -512,7 +881,7 @@ class DefaultEntryRepository @Inject constructor(
             .distinctUntilChanged()
 
     override fun observeDrawerOverview(): Flow<DrawerOverviewSummary> =
-        database.invalidationTracker.createFlow("entries", emitInitialState = true)
+        database.invalidationTracker.createFlow("entries", "attachments", emitInitialState = true)
             .mapLatest {
                 database.inReadTransaction {
                     val projection = entryDao.getDrawerOverview()
@@ -522,6 +891,7 @@ class DefaultEntryRepository @Inject constructor(
                         openTodoCount = projection.openTodoCount ?: 0,
                         completedTodoCount = projection.completedTodoCount ?: 0,
                         latestOpenTodoPreview = projection.latestOpenTodoPreview?.trim()?.takeIf { it.isNotEmpty() },
+                        archivedCount = projection.archivedCount ?: 0,
                     )
                 }
             }
@@ -532,6 +902,7 @@ class DefaultEntryRepository @Inject constructor(
             "entries",
             "tags",
             "entry_tags",
+            "attachments",
             emitInitialState = true,
         )
             .mapLatest {
@@ -592,6 +963,12 @@ class DefaultEntryRepository @Inject constructor(
             }
             .distinctUntilChanged()
 
+    private fun todoStatusesForMode(mode: TodoFilterMode): List<String> = when (mode) {
+        TodoFilterMode.OPEN -> listOf(TaskStatus.TODO.name)
+        TodoFilterMode.DONE -> listOf(TaskStatus.DONE.name)
+        TodoFilterMode.ALL -> listOf(TaskStatus.TODO.name, TaskStatus.DONE.name)
+    }
+
     private fun observeHydratedTables(): Flow<Set<String>> =
         database.invalidationTracker.createFlow(
             "entries",
@@ -602,7 +979,64 @@ class DefaultEntryRepository @Inject constructor(
             emitInitialState = true,
         )
 
+    private class BatchHydratingPagingSource(
+        private val delegate: PagingSource<Int, EntryEntity>,
+        private val database: ThreadLogDatabase,
+        private val hydrator: EntryHydrator,
+    ) : PagingSource<Int, EntryWithDetails>() {
+
+        init {
+            delegate.registerInvalidatedCallback {
+                invalidate()
+            }
+            registerInvalidatedCallback {
+                delegate.invalidate()
+            }
+            if (delegate.invalid) {
+                invalidate()
+            }
+        }
+
+        override val jumpingSupported: Boolean
+            get() = delegate.jumpingSupported
+
+        override val keyReuseSupported: Boolean
+            get() = delegate.keyReuseSupported
+
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EntryWithDetails> {
+            return when (val result = delegate.load(params)) {
+                is LoadResult.Page -> {
+                    val hydrated = if (result.data.isEmpty()) {
+                        emptyList()
+                    } else {
+                        database.inReadTransaction {
+                            hydrator.hydrateEntries(result.data)
+                        }
+                    }
+                    LoadResult.Page(
+                        data = hydrated,
+                        prevKey = result.prevKey,
+                        nextKey = result.nextKey,
+                        itemsBefore = result.itemsBefore,
+                        itemsAfter = result.itemsAfter,
+                    )
+                }
+
+                is LoadResult.Error -> LoadResult.Error(result.throwable)
+                is LoadResult.Invalid -> LoadResult.Invalid()
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, EntryWithDetails>): Int? {
+            val anchorPosition = state.anchorPosition ?: return null
+            val initialLoadSize = state.config.initialLoadSize
+            return maxOf(0, anchorPosition - (initialLoadSize / 2))
+        }
+    }
+
     private companion object {
         const val DEFAULT_PAGE_SIZE = 30
+        const val JUMP_THRESHOLD = 60
+        const val MAX_PAGING_SIZE = 300
     }
 }

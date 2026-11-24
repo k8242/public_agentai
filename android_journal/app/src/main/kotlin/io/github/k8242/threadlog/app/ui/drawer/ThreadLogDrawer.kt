@@ -45,6 +45,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Person
@@ -99,7 +100,7 @@ data class DrawerNavDestination(
  * WhatsApp-inspired hidable left panel containing:
  * - Top utility actions (moved from the old Chat top bar)
  * - Compact view navigation strip (moved from the old bottom NavigationBar)
- * - Filterable Topics, TODOs, Projects, People, and Tags list
+ * - Filterable Topics, TODOs, Archived, Projects, People, and Tags list
  * - One-tap Color Scheme & Light/Dark mode quick switcher
  */
 @Composable
@@ -113,6 +114,7 @@ fun ThreadLogDrawerSheet(
     onSearchQueryChanged: (String) -> Unit,
     onSelectCategory: (DrawerCategoryTab) -> Unit,
     onToggleShowHiddenAutoTags: () -> Unit,
+    onToggleShowHiddenPlaceholderMessages: () -> Unit = {},
     onOpenAutoTagReview: () -> Unit,
     onOpenSettings: () -> Unit,
     onSelectColorScheme: (AppColorScheme) -> Unit,
@@ -306,6 +308,63 @@ fun ThreadLogDrawerSheet(
                         avatarText = null,
                         onClick = { onSelectChatFilter(ChatFeedFilter.Todos()) },
                     )
+                }
+
+                // Pinned: Archived bucket
+                item(key = "pinned_archived") {
+                    val selected = isChatActive && activeChatFilter == ChatFeedFilter.Archived
+                    val archivedCount = uiState.overview.archivedCount
+                    val archivedSubtitle = if (archivedCount > 0) {
+                        if (archivedCount == 1) "1 archived note" else "$archivedCount archived notes"
+                    } else {
+                        "Archived notes are hidden from other views"
+                    }
+                    DrawerConversationRow(
+                        title = "Archived",
+                        subtitle = archivedSubtitle,
+                        badgeCount = archivedCount,
+                        badgeAccent = false,
+                        selected = selected,
+                        avatarBg = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        avatarFg = MaterialTheme.colorScheme.onSurfaceVariant,
+                        avatarIcon = Icons.Outlined.Inventory2,
+                        avatarText = null,
+                        onClick = { onSelectChatFilter(ChatFeedFilter.Archived) },
+                    )
+                }
+
+                // Toggle: Show hidden placeholder messages in All Notes
+                item(key = "toggle_show_hidden_messages") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FilterChip(
+                            selected = uiState.showHiddenPlaceholderMessages,
+                            onClick = onToggleShowHiddenPlaceholderMessages,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (uiState.showHiddenPlaceholderMessages) {
+                                        Icons.Outlined.Visibility
+                                    } else {
+                                        Icons.Outlined.VisibilityOff
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = "Show hidden messages",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                    }
                 }
 
                 item(key = "pinned_divider") {

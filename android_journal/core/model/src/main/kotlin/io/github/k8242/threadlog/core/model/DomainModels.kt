@@ -20,9 +20,13 @@ data class Entry(
     val deletedAtMs: Long? = null,     // Non-null = soft-deleted tombstone
     val taskStatus: TaskStatus = TaskStatus.NONE,
     val reactions: List<String> = emptyList(),
+    val taskPriority: TaskPriority = TaskPriority.NONE,
+    val isHighlighted: Boolean = false,
+    val archivedAtMs: Long? = null,
 ) {
     val isEdited: Boolean get() = updatedAtMs != null && updatedAtMs > createdAtMs
     val isDeleted: Boolean get() = deletedAtMs != null
+    val isArchived: Boolean get() = archivedAtMs != null
     val isTask: Boolean get() = taskStatus != TaskStatus.NONE
     val isTaskDone: Boolean get() = taskStatus == TaskStatus.DONE
 }
@@ -106,11 +110,19 @@ data class CompactEntrySummary(
     val hasAttachments: Boolean,
     val hasBookmarks: Boolean,
     val hasCodeBlock: Boolean,
-)
+    val taskStatus: TaskStatus = TaskStatus.NONE,
+    val taskPriority: TaskPriority = TaskPriority.NONE,
+    val isHighlighted: Boolean = false,
+) {
+    val isTask: Boolean get() = taskStatus != TaskStatus.NONE
+    val isTaskDone: Boolean get() = taskStatus == TaskStatus.DONE
+}
 
 data class CalendarDayCount(
     val localDate: String,             // "YYYY-MM-DD"
     val entryCount: Int,
+    val openTodoCount: Int = 0,
+    val completedTodoCount: Int = 0,
 )
 
 @Serializable
@@ -135,6 +147,8 @@ sealed interface ChatFeedFilter {
 
     data class Todos(
         val mode: TodoFilterMode = TodoFilterMode.OPEN,
+        val priorityFilter: TaskPriority? = null,
+        val sortOrder: TodoSortOrder = TodoSortOrder.NEWEST,
     ) : ChatFeedFilter
 
     data class TagSubtree(
@@ -142,6 +156,8 @@ sealed interface ChatFeedFilter {
         val fullPath: String,
         val displayLabel: String,
     ) : ChatFeedFilter
+
+    data object Archived : ChatFeedFilter
 }
 
 /** High-level counts & previews displayed in the hidable left panel. */
@@ -151,6 +167,13 @@ data class DrawerOverviewSummary(
     val openTodoCount: Int = 0,
     val completedTodoCount: Int = 0,
     val latestOpenTodoPreview: String? = null,
+    val archivedCount: Int = 0,
+)
+
+/** Per-day entry bucket for fast timeline scrubber indexing. */
+data class TimelineDateBucket(
+    val localDate: String,
+    val entryCount: Int,
 )
 
 /** Per-tag conversation-style summary row displayed in the hidable left panel. */
@@ -167,6 +190,7 @@ data class UserSettings(
     val weekStart: WeekStart = WeekStart.MONDAY,
     val offlineOnlyLinks: Boolean = false,
     val showHiddenAutoTagsInChat: Boolean = false,
+    val showHiddenPlaceholderMessages: Boolean = false,
     val scheduledBackupCadence: BackupCadence = BackupCadence.OFF,
     val linkedSpreadsheetId: String? = null,
     val linkedMediaFolderId: String? = null,

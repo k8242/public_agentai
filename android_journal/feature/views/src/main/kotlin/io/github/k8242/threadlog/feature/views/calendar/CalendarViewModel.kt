@@ -5,6 +5,7 @@ package io.github.k8242.threadlog.feature.views.calendar
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.k8242.threadlog.core.model.CalendarDayCount
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.WeekStart
 import io.github.k8242.threadlog.core.model.contract.DateWeekCalculator
@@ -91,7 +92,7 @@ class CalendarViewModel private constructor(
         ::CalendarSelection,
     )
 
-    private val dayCountsFlow: Flow<Map<String, Int>> = combine(
+    private val dayCountsFlow: Flow<Map<String, CalendarDayCount>> = combine(
         displayedMonthFlow,
         selectedTagFilterPathFlow,
     ) { month, filterPath ->
@@ -103,7 +104,7 @@ class CalendarViewModel private constructor(
                 filterTagPathPrefix = filterPath,
             )
             .map { counts ->
-                counts.associate { it.localDate to it.entryCount }
+                counts.associateBy { it.localDate }
             }
     }
 
@@ -132,16 +133,18 @@ class CalendarViewModel private constructor(
         tagRepository.observeAllTags(),
         dayCountsFlow,
         selectedDayEntriesFlow,
-    ) { selection, settings, allTags, countsByDate, dayEntriesState ->
+    ) { selection, settings, allTags, dayCountsByDate, dayEntriesState ->
         val today = todayProvider()
         val weekStart = settings.weekStart
         val tagDisplayLabels = leafDisambiguator.computeDisplayLabels(allTags)
         val cells = CalendarGridBuilder.buildMonthGrid(
             yearMonth = selection.displayedMonth,
             weekStart = weekStart,
-            countsByDate = countsByDate,
+            countsByDate = dayCountsByDate.mapValues { it.value.entryCount },
             today = today,
             selectedDate = selection.selectedDate,
+            openTodoCountsByDate = dayCountsByDate.mapValues { it.value.openTodoCount },
+            completedTodoCountsByDate = dayCountsByDate.mapValues { it.value.completedTodoCount },
         )
         val entryItems = dayEntriesState.entries.map { details ->
             val timeLabel = dateWeekCalculator.dividerMeta(

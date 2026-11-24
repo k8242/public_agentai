@@ -21,6 +21,9 @@ data class SheetEntryRow(
     val deleted: Boolean,
     val taskStatus: String = "NONE",
     val reactions: List<String> = emptyList(),
+    val taskPriority: String = "NONE",
+    val isHighlighted: Boolean = false,
+    val archivedAtIso: String? = null,
 )
 
 @Serializable

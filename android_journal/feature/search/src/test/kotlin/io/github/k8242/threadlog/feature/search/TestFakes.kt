@@ -30,10 +30,15 @@ import kotlinx.coroutines.flow.map
 internal data class RecordedSearchCall(
     val query: String,
     val includeHiddenAutoTags: Boolean,
+    val includeArchived: Boolean = false,
 )
 
 internal class FakeSearchRepository(
-    var handler: suspend (query: String, includeHiddenAutoTags: Boolean) -> HybridSearchResult = { query, includeHidden ->
+    var handler: suspend (
+        query: String,
+        includeHiddenAutoTags: Boolean,
+        includeArchived: Boolean,
+    ) -> HybridSearchResult = { query, includeHidden, _ ->
         HybridSearchResult(
             query = query,
             includeHiddenAutoTags = includeHidden,
@@ -50,9 +55,25 @@ internal class FakeSearchRepository(
         query: String,
         includeHiddenAutoTags: Boolean,
         nowMs: Long,
+    ): HybridSearchResult = search(
+        query = query,
+        includeHiddenAutoTags = includeHiddenAutoTags,
+        includeArchived = false,
+        nowMs = nowMs,
+    )
+
+    override suspend fun search(
+        query: String,
+        includeHiddenAutoTags: Boolean,
+        includeArchived: Boolean,
+        nowMs: Long,
     ): HybridSearchResult {
-        recordedCalls += RecordedSearchCall(query = query, includeHiddenAutoTags = includeHiddenAutoTags)
-        return handler(query, includeHiddenAutoTags)
+        recordedCalls += RecordedSearchCall(
+            query = query,
+            includeHiddenAutoTags = includeHiddenAutoTags,
+            includeArchived = includeArchived,
+        )
+        return handler(query, includeHiddenAutoTags, includeArchived)
     }
 }
 

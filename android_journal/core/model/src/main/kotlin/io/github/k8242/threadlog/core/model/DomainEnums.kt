@@ -76,6 +76,20 @@ enum class TodoFilterMode {
 }
 
 @Serializable
+enum class TaskPriority(val sortRank: Int) {
+    NONE(0),
+    LOW(1),
+    MEDIUM(2),
+    HIGH(3),
+}
+
+@Serializable
+enum class TodoSortOrder {
+    NEWEST,
+    PRIORITY,
+}
+
+@Serializable
 enum class AppColorScheme {
     TEAL,
     WHATSAPP,

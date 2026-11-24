@@ -39,6 +39,7 @@ data class DrawerUiState(
     val selectedCategory: DrawerCategoryTab = DrawerCategoryTab.ALL,
     val pendingAutoTagCount: Int = 0,
     val showHiddenAutoTagsInChat: Boolean = false,
+    val showHiddenPlaceholderMessages: Boolean = false,
     val colorScheme: AppColorScheme = AppColorScheme.TEAL,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
 ) {
@@ -121,6 +122,7 @@ class DrawerViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         showHiddenAutoTagsInChat = settings.showHiddenAutoTagsInChat,
+                        showHiddenPlaceholderMessages = settings.showHiddenPlaceholderMessages,
                         colorScheme = settings.colorScheme,
                         themeMode = settings.themeMode,
                     )
@@ -142,6 +144,14 @@ class DrawerViewModel @Inject constructor(
         _uiState.update { it.copy(showHiddenAutoTagsInChat = next) }
         viewModelScope.launch {
             settingsRepository.setShowHiddenAutoTagsInChat(next)
+        }
+    }
+
+    fun toggleShowHiddenPlaceholderMessages() {
+        val next = !_uiState.value.showHiddenPlaceholderMessages
+        _uiState.update { it.copy(showHiddenPlaceholderMessages = next) }
+        viewModelScope.launch {
+            settingsRepository.setShowHiddenPlaceholderMessages(next)
         }
     }
 

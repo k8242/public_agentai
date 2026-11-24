@@ -69,6 +69,40 @@ class SyncDiffEngineTest {
     }
 
     @Test
+    fun workbookMapper_priorityHighlightAndArchive_matchHashesAndDetectRemoteChanges() {
+        val baseEntry = sampleEntry(id = "e-meta", bodyRaw = "Ship release")
+        val baseHash = WorkbookMapper.computeLocalEntrySyncHash(baseEntry)
+
+        val prioritized = baseEntry.copy(
+            entry = baseEntry.entry.copy(
+                taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.TODO,
+                taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+                isHighlighted = true,
+                archivedAtMs = 1_763_700_000_000L,
+            ),
+        )
+        val sheetRow = WorkbookMapper.toSheetEntryRow(prioritized)
+        val localHash = WorkbookMapper.computeLocalEntrySyncHash(prioritized)
+        val remoteHash = WorkbookMapper.computeRemoteRowContentHash(sheetRow)
+
+        assertThat(sheetRow.taskPriority).isEqualTo("HIGH")
+        assertThat(sheetRow.isHighlighted).isTrue()
+        assertThat(sheetRow.archivedAtIso).isNotNull()
+        assertThat(remoteHash).isEqualTo(localHash)
+        assertThat(localHash).isNotEqualTo(baseHash)
+
+        // Changing priority/highlight/archive remotely is detected as EDITED_FROM_REMOTE.
+        val preview = diffEngine.computeDiff(
+            sourceFormat = BackupFormat.GOOGLE_SHEETS,
+            localEntries = listOf(baseEntry),
+            localTags = emptyList(),
+            lastSyncedHashes = mapOf("e-meta" to baseHash),
+            remoteWorkbook = workbookWith(entries = listOf(sheetRow)),
+        )
+        assertThat(preview.editedItems.map { it.diffKey }).containsExactly("e-meta")
+    }
+
+    @Test
     fun computeDiff_blankIdHumanAddedRow_createsNewItemWithValidationWarning() {
         val remoteRow = SheetEntryRow(
             entryId = "",

@@ -13,6 +13,8 @@ import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskPriority
+import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
@@ -114,14 +116,20 @@ internal class FakeEntryRepository : EntryRepository {
         return entriesByIdFlow.map { map ->
             map.values
                 .asSequence()
-                .filter { !it.entry.isDeleted }
+                .filter { !it.entry.isDeleted && !it.entry.isArchived }
                 .filter { it.entry.localDate.startsWith(yearMonth) }
                 .filter { matchesTagPrefix(it, filterTagPathPrefix) }
-                .groupingBy { it.entry.localDate }
-                .eachCount()
+                .groupBy { it.entry.localDate }
                 .entries
                 .sortedBy { it.key }
-                .map { (date, count) -> CalendarDayCount(localDate = date, entryCount = count) }
+                .map { (date, dayEntries) ->
+                    CalendarDayCount(
+                        localDate = date,
+                        entryCount = dayEntries.size,
+                        openTodoCount = dayEntries.count { it.entry.taskStatus == TaskStatus.TODO },
+                        completedTodoCount = dayEntries.count { it.entry.taskStatus == TaskStatus.DONE },
+                    )
+                }
         }
     }
 
@@ -265,6 +273,9 @@ internal object ViewsTestData {
         bodyPlain: String = "Entry $id",
         tags: List<Tag> = emptyList(),
         tagState: TagState = TagState.USER,
+        taskStatus: TaskStatus = TaskStatus.NONE,
+        taskPriority: TaskPriority = TaskPriority.NONE,
+        isHighlighted: Boolean = false,
     ): EntryWithDetails {
         val createdAt = epochMs(localDate, hour, minute, zoneId)
         val entry = Entry(
@@ -276,6 +287,9 @@ internal object ViewsTestData {
             bodyRaw = bodyPlain,
             bodyPlain = bodyPlain,
             contentHash = "hash-$id",
+            taskStatus = taskStatus,
+            taskPriority = taskPriority,
+            isHighlighted = isHighlighted,
         )
         return EntryWithDetails(
             entry = entry,
@@ -303,6 +317,9 @@ internal object ViewsTestData {
         hasAttachments: Boolean = false,
         hasBookmarks: Boolean = false,
         hasCodeBlock: Boolean = false,
+        taskStatus: TaskStatus = TaskStatus.NONE,
+        taskPriority: TaskPriority = TaskPriority.NONE,
+        isHighlighted: Boolean = false,
     ): CompactEntrySummary = CompactEntrySummary(
         id = id,
         createdAtMs = epochMs(localDate, hour, minute, zoneId),
@@ -312,5 +329,8 @@ internal object ViewsTestData {
         hasAttachments = hasAttachments,
         hasBookmarks = hasBookmarks,
         hasCodeBlock = hasCodeBlock,
+        taskStatus = taskStatus,
+        taskPriority = taskPriority,
+        isHighlighted = isHighlighted,
     )
 }

@@ -56,6 +56,12 @@ class DataStoreSettingsRepository @Inject constructor(
         }
     }
 
+    override suspend fun setShowHiddenPlaceholderMessages(show: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_SHOW_HIDDEN_PLACEHOLDERS] = show
+        }
+    }
+
     override suspend fun setScheduledBackupCadence(cadence: BackupCadence) {
         dataStore.edit { prefs ->
             prefs[KEY_SCHEDULED_BACKUP_CADENCE] = cadence.name
@@ -128,6 +134,7 @@ class DataStoreSettingsRepository @Inject constructor(
             weekStart = weekStart,
             offlineOnlyLinks = this[KEY_OFFLINE_ONLY_LINKS] ?: false,
             showHiddenAutoTagsInChat = this[KEY_SHOW_HIDDEN_AUTO_TAGS] ?: false,
+            showHiddenPlaceholderMessages = this[KEY_SHOW_HIDDEN_PLACEHOLDERS] ?: false,
             scheduledBackupCadence = cadence,
             linkedSpreadsheetId = this[KEY_LINKED_SPREADSHEET_ID],
             linkedMediaFolderId = this[KEY_LINKED_MEDIA_FOLDER_ID],
@@ -144,6 +151,7 @@ class DataStoreSettingsRepository @Inject constructor(
         private val KEY_WEEK_START = stringPreferencesKey("week_start")
         private val KEY_OFFLINE_ONLY_LINKS = booleanPreferencesKey("offline_only_links")
         private val KEY_SHOW_HIDDEN_AUTO_TAGS = booleanPreferencesKey("show_hidden_auto_tags_in_chat")
+        private val KEY_SHOW_HIDDEN_PLACEHOLDERS = booleanPreferencesKey("show_hidden_placeholder_messages")
         private val KEY_SCHEDULED_BACKUP_CADENCE = stringPreferencesKey("scheduled_backup_cadence")
         private val KEY_LINKED_SPREADSHEET_ID = stringPreferencesKey("linked_spreadsheet_id")
         private val KEY_LINKED_MEDIA_FOLDER_ID = stringPreferencesKey("linked_media_folder_id")

@@ -28,6 +28,7 @@ data class ParsedMessage(
     val bodyPlain: String,
     val extractedUrls: List<ExtractedUrl>,
     val inlineTags: List<InlineTagToken> = emptyList(),
+    val cleanedBodyRaw: String = "",
 )
 
 data class ExtractedUrl(

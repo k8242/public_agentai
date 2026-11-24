@@ -7,6 +7,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,13 +54,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.feature.views.common.LeafTagChip
+import io.github.k8242.threadlog.feature.views.common.TaskStatusBadge
+import io.github.k8242.threadlog.feature.views.common.highlightBubbleColor
+import io.github.k8242.threadlog.feature.views.common.priorityTrimColor
 
 /**
  * Stateful Monthly Calendar View screen wired to [CalendarViewModel].
@@ -348,7 +354,10 @@ private fun CalendarGridCell(
         return
     }
 
+    val isDark = isSystemInDarkTheme()
     val dotsCount = CalendarGridBuilder.densityDotsCount(cell.entryCount)
+    val openTodoDotColor = priorityTrimColor(TaskPriority.HIGH, isDark)
+        ?: MaterialTheme.colorScheme.tertiary
     val circleModifier = when {
         cell.isSelected -> Modifier
             .size(32.dp)
@@ -401,10 +410,18 @@ private fun CalendarGridCell(
         }
         Spacer(modifier = Modifier.height(3.dp))
         Row(
-            modifier = Modifier.height(5.dp),
+            modifier = Modifier.height(6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (cell.openTodoCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(openTodoDotColor),
+                )
+            }
             repeat(dotsCount) {
                 Box(
                     modifier = Modifier
@@ -484,6 +501,30 @@ private fun CalendarDayEntryCard(
     onOpenContextWindow: () -> Unit,
 ) {
     val details = item.details
+    val entry = details.entry
+    val isDark = isSystemInDarkTheme()
+    val priorityColor = if (entry.isTask) {
+        priorityTrimColor(entry.taskPriority, isDark)
+    } else {
+        null
+    }
+    val containerColor = if (entry.isHighlighted) {
+        highlightBubbleColor(isDark)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val cardBorder = if (priorityColor != null) {
+        BorderStroke(
+            width = if (entry.taskPriority == TaskPriority.LOW) 1.25.dp else 1.5.dp,
+            color = priorityColor,
+        )
+    } else {
+        BorderStroke(
+            width = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -491,12 +532,9 @@ private fun CalendarDayEntryCard(
             .clickable(onClick = onOpenEntryInChat),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = containerColor,
         ),
-        border = BorderStroke(
-            width = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant,
-        ),
+        border = cardBorder,
     ) {
         Column(
             modifier = Modifier
@@ -519,7 +557,13 @@ private fun CalendarDayEntryCard(
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    if (details.entry.isEdited) {
+                    if (entry.isTask) {
+                        TaskStatusBadge(
+                            taskStatus = entry.taskStatus,
+                            taskPriority = entry.taskPriority,
+                        )
+                    }
+                    if (entry.isEdited) {
                         Text(
                             text = "Edited",
                             style = MaterialTheme.typography.labelSmall,
@@ -550,11 +594,21 @@ private fun CalendarDayEntryCard(
                 }
             }
 
-            if (details.entry.bodyPlain.isNotBlank()) {
+            if (entry.bodyPlain.isNotBlank()) {
                 Text(
-                    text = details.entry.bodyPlain,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = entry.bodyPlain,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        textDecoration = if (entry.isTaskDone) {
+                            TextDecoration.LineThrough
+                        } else {
+                            null
+                        },
+                    ),
+                    color = if (entry.isTaskDone) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )

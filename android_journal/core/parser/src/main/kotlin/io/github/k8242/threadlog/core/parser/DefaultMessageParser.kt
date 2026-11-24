@@ -116,14 +116,32 @@ class DefaultMessageParser : MessageParser {
         }
 
         val bodyPlain = buildBodyPlain(blocks)
-        val inlineTags = extractInlineTags(blocks)
+        val (cleanedBodyRaw, inlineTags) = stripInlineTagsAndUnescape(normalized)
         return ParsedMessage(
             blocks = blocks,
             bodyPlain = bodyPlain,
             extractedUrls = extractedUrls.values.toList(),
             inlineTags = inlineTags,
+            cleanedBodyRaw = cleanedBodyRaw,
         )
     }
+
+    /**
+     * Strips unescaped inline `@person`, `#topic`, and `+project` tag tokens from [text] (skipping
+     * fenced code blocks, inline code, and URLs) and unescapes `\@`, `\#`, and `\+` to literal
+     * `@`, `#`, `+`.
+     *
+     * Any token whose lowercase prefixed form (e.g. `"@alice"`, `"#123"`, `"+foo"`) is in
+     * [preserveLiteralTokens] is kept verbatim and excluded from the returned [InlineTagToken] list.
+     */
+    fun stripInlineTagsAndUnescape(
+        text: String,
+        preserveLiteralTokens: Set<String> = emptySet(),
+    ): Pair<String, List<InlineTagToken>> =
+        Companion.stripInlineTagsAndUnescape(text, preserveLiteralTokens)
+
+    fun extractLiteralTagTokenKeys(text: String): Set<String> =
+        Companion.extractLiteralTagTokenKeys(text)
 
     override fun detectTagTrigger(text: String, cursorPosition: Int): ActiveTagTrigger? {
         if (cursorPosition <= 0 || cursorPosition > text.length) {
@@ -222,6 +240,13 @@ class DefaultMessageParser : MessageParser {
                 }
             }
 
+            // 2b. Backslash-escaped tag prefixes: \@ -> @, \# -> #, \+ -> +
+            if (ch == '\\' && i + 1 < text.length && isTagPrefix(text[i + 1])) {
+                textBuf.append(text[i + 1])
+                i += 2
+                continue
+            }
+
             // 3. WhatsApp formatting markers: *bold*, _italic_, ~strike~
             if (isFormattingMarker(ch) &&
                 ch !in activeMarkers &&
@@ -293,14 +318,6 @@ class DefaultMessageParser : MessageParser {
         return !next.isWhitespace() && next != marker
     }
 
-    private fun isValidClosingMarker(text: String, index: Int, marker: Char): Boolean {
-        if (index <= 0) return false
-        val prev = text[index - 1]
-        if (prev.isWhitespace() || prev == marker) return false
-        if (index + 1 < text.length && text[index + 1].isLetterOrDigit()) return false
-        return true
-    }
-
     private fun wrapMarkerSpan(marker: Char, children: List<InlineSpan>): InlineSpan =
         when (marker) {
             '*' -> InlineSpan.Bold(children)
@@ -308,105 +325,6 @@ class DefaultMessageParser : MessageParser {
             '~' -> InlineSpan.Strike(children)
             else -> error("Unsupported formatting marker: $marker")
         }
-
-    private data class UrlMatch(
-        val rawUrl: String,
-        val domain: String,
-        val isLong: Boolean,
-        val endExclusive: Int,
-    )
-
-    private fun matchUrl(
-        text: String,
-        start: Int,
-        activeMarkers: Set<Char>,
-    ): UrlMatch? {
-        var end = start
-        while (end < text.length) {
-            val c = text[end]
-            if (c.isWhitespace() || c == '<' || c == '>' || c == '"' || c == '`') {
-                break
-            }
-            end++
-        }
-
-        // Trim trailing sentence punctuation, unmatched closing brackets/parens, quotes,
-        // and any active formatting delimiter sitting at a valid close boundary.
-        while (end > start) {
-            val last = text[end - 1]
-            val candidate = text.substring(start, end)
-            val shouldTrim = when {
-                last in TRAILING_PUNCTUATION -> true
-                last == '\'' -> true
-                last in activeMarkers && isValidClosingMarker(text, end - 1, last) -> true
-                last == ')' -> candidate.count { it == ')' } > candidate.count { it == '(' }
-                last == ']' -> candidate.count { it == ']' } > candidate.count { it == '[' }
-                last == '}' -> candidate.count { it == '}' } > candidate.count { it == '{' }
-                else -> false
-            }
-            if (shouldTrim) {
-                end--
-            } else {
-                break
-            }
-        }
-
-        val rawUrl = text.substring(start, end)
-        val schemeEnd = when {
-            rawUrl.startsWith("https://", ignoreCase = true) -> 8
-            rawUrl.startsWith("http://", ignoreCase = true) -> 7
-            else -> return null
-        }
-
-        val afterScheme = rawUrl.substring(schemeEnd)
-        if (afterScheme.isEmpty()) return null
-
-        val authorityEnd = afterScheme.indexOfAny(charArrayOf('/', '?', '#'))
-        val authority = if (authorityEnd == -1) afterScheme else afterScheme.substring(0, authorityEnd)
-        val remainder = if (authorityEnd == -1) "" else afterScheme.substring(authorityEnd)
-
-        val domain = extractDomain(authority) ?: return null
-        val isLong = computeIsLongUrl(rawUrl, remainder)
-
-        return UrlMatch(
-            rawUrl = rawUrl,
-            domain = domain,
-            isLong = isLong,
-            endExclusive = end,
-        )
-    }
-
-    private fun extractDomain(authority: String): String? {
-        if (authority.isEmpty()) return null
-        val hostPort = authority.substringAfterLast('@')
-        if (hostPort.isEmpty()) return null
-
-        val host = if (hostPort.startsWith('[')) {
-            val closing = hostPort.indexOf(']')
-            if (closing <= 1) return null
-            hostPort.substring(0, closing + 1)
-        } else {
-            hostPort.substringBefore(':')
-        }
-
-        if (host.isEmpty() || host.startsWith('.') || host.endsWith('.')) return null
-        if (!host.any { it.isLetterOrDigit() }) return null
-
-        val normalized = host.lowercase(Locale.ROOT).removePrefix("www.")
-        return normalized.ifEmpty { null }
-    }
-
-    private fun computeIsLongUrl(rawUrl: String, remainder: String): Boolean {
-        if (rawUrl.length > LONG_URL_THRESHOLD) return true
-
-        val beforeFragment = remainder.substringBefore('#')
-        val queryIndex = beforeFragment.indexOf('?')
-        if (queryIndex != -1) return true
-
-        val path = beforeFragment
-        val nonEmptySegments = path.split('/').count { it.isNotEmpty() }
-        return nonEmptySegments > MAX_SHORT_PATH_SEGMENTS
-    }
 
     private fun buildBodyPlain(blocks: List<MessageBlock>): String {
         val parts = mutableListOf<String>()
@@ -441,61 +359,6 @@ class DefaultMessageParser : MessageParser {
         return sb.toString()
     }
 
-    private fun extractInlineTags(blocks: List<MessageBlock>): List<InlineTagToken> {
-        val seen = LinkedHashMap<String, InlineTagToken>()
-
-        fun scanText(text: String) {
-            var i = 0
-            while (i < text.length) {
-                val ch = text[i]
-                if ((ch == '@' || ch == '#' || ch == '+') &&
-                    (i == 0 || isTriggerPrecedingChar(text[i - 1]))
-                ) {
-                    var end = i + 1
-                    while (end < text.length && isValidTagQueryChar(text[end])) {
-                        end++
-                    }
-                    val raw = text.substring(i + 1, end).trimEnd('.', '/', '-', '_')
-                    if (raw.isNotEmpty() && raw.any { it.isLetterOrDigit() }) {
-                        val kind = when (ch) {
-                            '@' -> TagTriggerKind.PERSON_AT
-                            '+' -> TagTriggerKind.PROJECT_PLUS
-                            else -> TagTriggerKind.ALL_HASH
-                        }
-                        val dedupeKey = "${kind.name}:${raw.lowercase(Locale.ROOT)}"
-                        seen.putIfAbsent(dedupeKey, InlineTagToken(kind = kind, rawValue = raw))
-                    }
-                    i = end
-                    continue
-                }
-                i++
-            }
-        }
-
-        fun scanSpans(spans: List<InlineSpan>) {
-            for (span in spans) {
-                when (span) {
-                    is InlineSpan.Text -> scanText(span.text)
-                    is InlineSpan.Bold -> scanSpans(span.children)
-                    is InlineSpan.Italic -> scanSpans(span.children)
-                    is InlineSpan.Strike -> scanSpans(span.children)
-                    is InlineSpan.InlineCode -> Unit
-                    is InlineSpan.Url -> Unit
-                }
-            }
-        }
-
-        for (block in blocks) {
-            when (block) {
-                is MessageBlock.Paragraph -> scanSpans(block.spans)
-                is MessageBlock.QuoteBlock -> block.lines.forEach(::scanSpans)
-                is MessageBlock.CodeBlock -> Unit
-            }
-        }
-
-        return seen.values.toList()
-    }
-
     private fun appendSpan(target: MutableList<InlineSpan>, span: InlineSpan) {
         if (span is InlineSpan.Text && target.lastOrNull() is InlineSpan.Text) {
             val prev = target.removeAt(target.lastIndex) as InlineSpan.Text
@@ -510,29 +373,337 @@ class DefaultMessageParser : MessageParser {
         return if (afterCaret.startsWith(' ')) afterCaret.substring(1) else afterCaret
     }
 
-    private fun normalizeLineEndings(input: String): String =
-        input.replace("\r\n", "\n").replace('\r', '\n')
-
-    private fun startsWithHttpScheme(text: String, index: Int): Boolean =
-        text.regionMatches(index, "https://", 0, 8, ignoreCase = true) ||
-            text.regionMatches(index, "http://", 0, 7, ignoreCase = true)
-
-    private fun isValidUrlStartBoundary(text: String, index: Int): Boolean =
-        index == 0 || !text[index - 1].isLetterOrDigit()
-
     private fun isFormattingMarker(ch: Char): Boolean =
         ch == '*' || ch == '_' || ch == '~'
 
-    private fun isTriggerPrecedingChar(ch: Char): Boolean =
-        ch.isWhitespace() || ch == '(' || ch == '[' || ch == '{'
+    companion object {
+        private const val FENCE = "```"
+        private const val LONG_URL_THRESHOLD = 40
+        private const val MAX_SHORT_PATH_SEGMENTS = 2
+        private val TRAILING_PUNCTUATION = setOf('.', ',', ';', ':', '!', '?')
+        private val PUNCTUATION_NO_LEADING_SPACE = setOf('.', ',', ';', ':', '!', '?', ')', ']', '}', '*', '_', '~')
 
-    private fun isValidTagQueryChar(ch: Char): Boolean =
-        ch.isLetterOrDigit() || ch == '/' || ch == '-' || ch == '_' || ch == '.'
+        private data class UrlMatch(
+            val rawUrl: String,
+            val domain: String,
+            val isLong: Boolean,
+            val endExclusive: Int,
+        )
 
-    private companion object {
-        const val FENCE = "```"
-        const val LONG_URL_THRESHOLD = 40
-        const val MAX_SHORT_PATH_SEGMENTS = 2
-        val TRAILING_PUNCTUATION = setOf('.', ',', ';', ':', '!', '?')
+        private data class LineStripResult(
+            val cleaned: String,
+            val hadStrippedTag: Boolean,
+        )
+
+        /**
+         * Extracts lowercase literal tag keys (e.g. `"@alice"`, `"#123"`, `"+foo"`) from unescaped
+         * tag-like tokens in [text]. Used by edit flows to preserve pre-existing literal tokens.
+         */
+        fun extractLiteralTagTokenKeys(text: String): Set<String> {
+            val (_, tokens) = stripInlineTagsAndUnescape(text)
+            return tokens.mapTo(HashSet()) { token ->
+                val prefix = when (token.kind) {
+                    TagTriggerKind.PERSON_AT -> '@'
+                    TagTriggerKind.PROJECT_PLUS -> '+'
+                    TagTriggerKind.ALL_HASH -> '#'
+                }
+                "$prefix${token.rawValue.lowercase(Locale.ROOT)}"
+            }
+        }
+
+        /**
+         * Strips unescaped inline `@person`, `#topic`, and `+project` tag tokens from [text]
+         * (skipping fenced code blocks, inline code, and URLs) and unescapes `\@`, `\#`, `\+`
+         * into literal `@`, `#`, `+`.
+         */
+        fun stripInlineTagsAndUnescape(
+            text: String,
+            preserveLiteralTokens: Set<String> = emptySet(),
+        ): Pair<String, List<InlineTagToken>> {
+            if (text.isEmpty()) return "" to emptyList()
+
+            val normalized = normalizeLineEndings(text)
+            val preserved = if (preserveLiteralTokens.isEmpty()) {
+                emptySet()
+            } else {
+                preserveLiteralTokens.mapTo(HashSet()) { it.trim().lowercase(Locale.ROOT) }
+            }
+
+            val lines = normalized.split('\n')
+            val outputLines = ArrayList<String>(lines.size)
+            val seenTags = LinkedHashMap<String, InlineTagToken>()
+            var inFencedCodeBlock = false
+
+            for (line in lines) {
+                val trimmedStart = line.trimStart()
+                if (inFencedCodeBlock) {
+                    outputLines += line
+                    if (line.trim() == FENCE) {
+                        inFencedCodeBlock = false
+                    }
+                    continue
+                }
+                if (trimmedStart.startsWith(FENCE)) {
+                    outputLines += line
+                    val trimmed = line.trim()
+                    if (!(trimmed.length >= FENCE.length * 2 && trimmed.endsWith(FENCE))) {
+                        inFencedCodeBlock = true
+                    }
+                    continue
+                }
+
+                if (line.startsWith(">")) {
+                    val quotePrefix = if (line.length >= 2 && line[1] == ' ') "> " else ">"
+                    val rest = line.substring(quotePrefix.length)
+                    val stripped = stripLineInlineTagsAndUnescape(rest, preserved, seenTags)
+                    if (stripped.hadStrippedTag && stripped.cleaned.isBlank()) {
+                        continue
+                    }
+                    outputLines += if (stripped.cleaned.isEmpty() && !stripped.hadStrippedTag) {
+                        line
+                    } else {
+                        quotePrefix + stripped.cleaned
+                    }
+                } else {
+                    val stripped = stripLineInlineTagsAndUnescape(line, preserved, seenTags)
+                    if (stripped.hadStrippedTag && stripped.cleaned.isBlank()) {
+                        continue
+                    }
+                    outputLines += stripped.cleaned
+                }
+            }
+
+            return outputLines.joinToString("\n") to seenTags.values.toList()
+        }
+
+        private fun stripLineInlineTagsAndUnescape(
+            text: String,
+            preserved: Set<String>,
+            seenTags: LinkedHashMap<String, InlineTagToken>,
+        ): LineStripResult {
+            if (text.isEmpty()) return LineStripResult("", hadStrippedTag = false)
+
+            val out = StringBuilder(text.length)
+            var hadStrippedTag = false
+            var i = 0
+
+            while (i < text.length) {
+                val ch = text[i]
+
+                // 1. Inline code: keep verbatim
+                if (ch == '`') {
+                    val closeIdx = text.indexOf('`', startIndex = i + 1)
+                    if (closeIdx > i + 1) {
+                        out.append(text, i, closeIdx + 1)
+                        i = closeIdx + 1
+                        continue
+                    }
+                    out.append(ch)
+                    i++
+                    continue
+                }
+
+                // 2. URL: keep verbatim
+                if ((ch == 'h' || ch == 'H') &&
+                    isValidUrlStartBoundary(text, i) &&
+                    startsWithHttpScheme(text, i)
+                ) {
+                    val urlMatch = matchUrl(text, i, emptySet())
+                    if (urlMatch != null) {
+                        out.append(text, i, urlMatch.endExclusive)
+                        i = urlMatch.endExclusive
+                        continue
+                    }
+                }
+
+                // 3. Backslash-escaped tag prefix: \@ -> @, \# -> #, \+ -> + (never tagged)
+                if (ch == '\\' && i + 1 < text.length && isTagPrefix(text[i + 1])) {
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                }
+
+                // 4. Unescaped inline tag token at valid boundary
+                if (isTagPrefix(ch) && (i == 0 || isTriggerPrecedingChar(text[i - 1]))) {
+                    var end = i + 1
+                    while (end < text.length && isValidTagQueryChar(text[end])) {
+                        end++
+                    }
+                    val raw = text.substring(i + 1, end).trimEnd('.', '/', '-', '_')
+                    if (raw.isNotEmpty() && raw.any { it.isLetterOrDigit() }) {
+                        val tokenEnd = i + 1 + raw.length
+                        val literalKey = "$ch${raw.lowercase(Locale.ROOT)}"
+                        if (literalKey in preserved) {
+                            out.append(text, i, tokenEnd)
+                            i = tokenEnd
+                            continue
+                        }
+
+                        val kind = when (ch) {
+                            '@' -> TagTriggerKind.PERSON_AT
+                            '+' -> TagTriggerKind.PROJECT_PLUS
+                            else -> TagTriggerKind.ALL_HASH
+                        }
+                        val dedupeKey = "${kind.name}:${raw.lowercase(Locale.ROOT)}"
+                        seenTags.putIfAbsent(dedupeKey, InlineTagToken(kind = kind, rawValue = raw))
+                        hadStrippedTag = true
+
+                        var nextIdx = tokenEnd
+                        val nextChar = text.getOrNull(nextIdx)
+                        val outEndsWithSpace = out.isNotEmpty() && (out.last() == ' ' || out.last() == '\t')
+
+                        when {
+                            out.isEmpty() && (nextChar == ' ' || nextChar == '\t') -> {
+                                while (nextIdx < text.length && (text[nextIdx] == ' ' || text[nextIdx] == '\t')) {
+                                    nextIdx++
+                                }
+                            }
+
+                            outEndsWithSpace && (nextChar == ' ' || nextChar == '\t') -> {
+                                while (nextIdx < text.length && (text[nextIdx] == ' ' || text[nextIdx] == '\t')) {
+                                    nextIdx++
+                                }
+                            }
+
+                            outEndsWithSpace && (nextChar == null || nextChar in PUNCTUATION_NO_LEADING_SPACE) -> {
+                                while (out.isNotEmpty() && (out.last() == ' ' || out.last() == '\t')) {
+                                    out.setLength(out.length - 1)
+                                }
+                            }
+                        }
+
+                        i = nextIdx
+                        continue
+                    }
+                }
+
+                out.append(ch)
+                i++
+            }
+
+            return LineStripResult(
+                cleaned = out.toString(),
+                hadStrippedTag = hadStrippedTag,
+            )
+        }
+
+        private fun normalizeLineEndings(input: String): String =
+            input.replace("\r\n", "\n").replace('\r', '\n')
+
+        private fun startsWithHttpScheme(text: String, index: Int): Boolean =
+            text.regionMatches(index, "https://", 0, 8, ignoreCase = true) ||
+                text.regionMatches(index, "http://", 0, 7, ignoreCase = true)
+
+        private fun isValidUrlStartBoundary(text: String, index: Int): Boolean =
+            index == 0 || !text[index - 1].isLetterOrDigit()
+
+        private fun isTagPrefix(ch: Char): Boolean =
+            ch == '@' || ch == '#' || ch == '+'
+
+        private fun isTriggerPrecedingChar(ch: Char): Boolean =
+            ch.isWhitespace() || ch == '(' || ch == '[' || ch == '{'
+
+        private fun isValidTagQueryChar(ch: Char): Boolean =
+            ch.isLetterOrDigit() || ch == '/' || ch == '-' || ch == '_' || ch == '.'
+
+        private fun isValidClosingMarker(text: String, index: Int, marker: Char): Boolean {
+            if (index <= 0) return false
+            val prev = text[index - 1]
+            if (prev.isWhitespace() || prev == marker) return false
+            if (index + 1 < text.length && text[index + 1].isLetterOrDigit()) return false
+            return true
+        }
+
+        private fun matchUrl(
+            text: String,
+            start: Int,
+            activeMarkers: Set<Char>,
+        ): UrlMatch? {
+            var end = start
+            while (end < text.length) {
+                val c = text[end]
+                if (c.isWhitespace() || c == '<' || c == '>' || c == '"' || c == '`') {
+                    break
+                }
+                end++
+            }
+
+            // Trim trailing sentence punctuation, unmatched closing brackets/parens, quotes,
+            // and any active formatting delimiter sitting at a valid close boundary.
+            while (end > start) {
+                val last = text[end - 1]
+                val candidate = text.substring(start, end)
+                val shouldTrim = when {
+                    last in TRAILING_PUNCTUATION -> true
+                    last == '\'' -> true
+                    last in activeMarkers && isValidClosingMarker(text, end - 1, last) -> true
+                    last == ')' -> candidate.count { it == ')' } > candidate.count { it == '(' }
+                    last == ']' -> candidate.count { it == ']' } > candidate.count { it == '[' }
+                    last == '}' -> candidate.count { it == '}' } > candidate.count { it == '{' }
+                    else -> false
+                }
+                if (shouldTrim) {
+                    end--
+                } else {
+                    break
+                }
+            }
+
+            val rawUrl = text.substring(start, end)
+            val schemeEnd = when {
+                rawUrl.startsWith("https://", ignoreCase = true) -> 8
+                rawUrl.startsWith("http://", ignoreCase = true) -> 7
+                else -> return null
+            }
+
+            val afterScheme = rawUrl.substring(schemeEnd)
+            if (afterScheme.isEmpty()) return null
+
+            val authorityEnd = afterScheme.indexOfAny(charArrayOf('/', '?', '#'))
+            val authority = if (authorityEnd == -1) afterScheme else afterScheme.substring(0, authorityEnd)
+            val remainder = if (authorityEnd == -1) "" else afterScheme.substring(authorityEnd)
+
+            val domain = extractDomain(authority) ?: return null
+            val isLong = computeIsLongUrl(rawUrl, remainder)
+
+            return UrlMatch(
+                rawUrl = rawUrl,
+                domain = domain,
+                isLong = isLong,
+                endExclusive = end,
+            )
+        }
+
+        private fun extractDomain(authority: String): String? {
+            if (authority.isEmpty()) return null
+            val hostPort = authority.substringAfterLast('@')
+            if (hostPort.isEmpty()) return null
+
+            val host = if (hostPort.startsWith('[')) {
+                val closing = hostPort.indexOf(']')
+                if (closing <= 1) return null
+                hostPort.substring(0, closing + 1)
+            } else {
+                hostPort.substringBefore(':')
+            }
+
+            if (host.isEmpty() || host.startsWith('.') || host.endsWith('.')) return null
+            if (!host.any { it.isLetterOrDigit() }) return null
+
+            val normalized = host.lowercase(Locale.ROOT).removePrefix("www.")
+            return normalized.ifEmpty { null }
+        }
+
+        private fun computeIsLongUrl(rawUrl: String, remainder: String): Boolean {
+            if (rawUrl.length > LONG_URL_THRESHOLD) return true
+
+            val beforeFragment = remainder.substringBefore('#')
+            val queryIndex = beforeFragment.indexOf('?')
+            if (queryIndex != -1) return true
+
+            val path = beforeFragment
+            val nonEmptySegments = path.split('/').count { it.isNotEmpty() }
+            return nonEmptySegments > MAX_SHORT_PATH_SEGMENTS
+        }
     }
 }

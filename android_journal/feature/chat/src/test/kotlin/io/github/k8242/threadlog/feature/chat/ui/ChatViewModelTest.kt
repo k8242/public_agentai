@@ -10,6 +10,7 @@ import io.github.k8242.threadlog.core.model.Attachment
 import io.github.k8242.threadlog.core.model.BackupCadence
 import io.github.k8242.threadlog.core.model.Bookmark
 import io.github.k8242.threadlog.core.model.CalendarDayCount
+import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.CompactEntrySummary
 import io.github.k8242.threadlog.core.model.Entry
 import io.github.k8242.threadlog.core.model.EntryTag
@@ -17,6 +18,11 @@ import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskPriority
+import io.github.k8242.threadlog.core.model.TaskStatus
+import io.github.k8242.threadlog.core.model.TimelineDateBucket
+import io.github.k8242.threadlog.core.model.TodoFilterMode
+import io.github.k8242.threadlog.core.model.TodoSortOrder
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
 import io.github.k8242.threadlog.core.model.contract.AutoTagScheduler
@@ -37,6 +43,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -135,22 +142,24 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `selecting tag suggestion replaces token cleanly and deduplicates selectedTagIds`() = runTest {
+    fun `selecting tag suggestion strips inline trigger cleanly and deduplicates selectedTagIds`() = runTest {
         val vm = createViewModel()
         advanceUntilIdle()
 
         vm.onComposerTextChanged("Lunch with @le", cursor = 14)
         vm.onSelectTagSuggestion(lexTag)
 
-        assertThat(vm.uiState.value.composerText).isEqualTo("Lunch with @Lex ")
-        assertThat(vm.uiState.value.composerCursor).isEqualTo(16)
+        assertThat(vm.uiState.value.composerText).isEqualTo("Lunch with ")
+        assertThat(vm.uiState.value.composerCursor).isEqualTo(11)
         assertThat(vm.uiState.value.activeTagTrigger).isNull()
         assertThat(vm.uiState.value.tagSuggestions).isEmpty()
         assertThat(vm.uiState.value.selectedTagIds).containsExactly("tag-lex")
 
-        // Selecting the same tag again should not duplicate tag id
-        vm.onComposerTextChanged("Lunch with @Lex and @le", cursor = 23)
+        // Selecting the same tag again in the middle of text collapses double spaces and deduplicates tag id
+        vm.onComposerTextChanged("Lunch with @le tomorrow", cursor = 14)
         vm.onSelectTagSuggestion(lexTag)
+        assertThat(vm.uiState.value.composerText).isEqualTo("Lunch with tomorrow")
+        assertThat(vm.uiState.value.composerCursor).isEqualTo(11)
         assertThat(vm.uiState.value.selectedTagIds).containsExactly("tag-lex")
     }
 
@@ -197,7 +206,8 @@ class ChatViewModelTest {
 
         val replyTarget = sampleEntry("entry-parent", "Parent thought")
         vm.startReply(replyTarget)
-        vm.toggleSelectedTag(lexTag.id)
+        // Feature #3: startReply automatically copies the referenced message's visible tags
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(lexTag.id)
         vm.onComposerTextChanged("Check https://kotlinlang.org/docs", cursor = 33)
 
         vm.sendOrSave()
@@ -413,7 +423,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun projectPlusTrigger_suggestsOnlyProjects_andInsertsPlusMention() = runTest(testDispatcher) {
+    fun projectPlusTrigger_suggestsOnlyProjects_andStripsPlusTriggerOnSelect() = runTest(testDispatcher) {
         val vm = createViewModel()
         advanceUntilIdle()
 
@@ -421,7 +431,8 @@ class ChatViewModelTest {
         assertThat(vm.uiState.value.tagSuggestions.map { it.id }).containsExactly(journalProjectTag.id)
 
         vm.onSelectTagSuggestion(journalProjectTag)
-        assertThat(vm.uiState.value.composerText).isEqualTo("Working on +journal-app ")
+        assertThat(vm.uiState.value.composerText).isEqualTo("Working on ")
+        assertThat(vm.uiState.value.composerCursor).isEqualTo(11)
         assertThat(vm.uiState.value.selectedTagIds).contains(journalProjectTag.id)
     }
 
@@ -536,30 +547,398 @@ class ChatViewModelTest {
         assertThat(vm.uiState.value.composerCustomZoneId).isNull()
     }
 
+    @Test
+    fun resolveJumpTarget_usesEntryOffset_fallsBackToDateOffset_andPulsesHighlight() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        entryRepo.entryOffsets["entry-old" to ChatFeedFilter.All] = 142
+        entryRepo.dateOffsets["2022-08-13" to ChatFeedFilter.All] = 300
+
+        vm.resolveJumpTarget(entryId = "entry-old", localDate = "2022-08-13")
+        advanceUntilIdle()
+
+        val pending = vm.uiState.value.pendingJump
+        assertThat(pending).isNotNull()
+        assertThat(pending?.offset).isEqualTo(142)
+        assertThat(pending?.targetEntryId).isEqualTo("entry-old")
+        assertThat(pending?.targetFilter).isEqualTo(ChatFeedFilter.All)
+
+        vm.consumePendingJump(pending!!.nonce)
+        assertThat(vm.uiState.value.pendingJump).isNull()
+        assertThat(vm.uiState.value.highlightedEntryId).isEqualTo("entry-old")
+
+        // Highlight pulse clears automatically after 1.5s
+        advanceTimeBy(1_600L)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.highlightedEntryId).isNull()
+
+        // Missing entry falls back to findDateOffset
+        vm.resolveJumpTarget(entryId = "deleted-entry", localDate = "2022-08-13")
+        advanceUntilIdle()
+        val fallback = vm.uiState.value.pendingJump
+        assertThat(fallback?.offset).isEqualTo(300)
+        assertThat(fallback?.targetEntryId).isNull()
+    }
+
+    @Test
+    fun jumpToReplyParent_checksActiveFilterThenSwitchesToAllOrShowsDeletedError() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val todosFilter = ChatFeedFilter.Todos(mode = TodoFilterMode.OPEN)
+        vm.setFeedFilter(todosFilter)
+        entryRepo.entryOffsets["parent-in-all" to ChatFeedFilter.All] = 88
+
+        var switchedFilter: ChatFeedFilter? = null
+        vm.jumpToReplyParent("parent-in-all") { switchedFilter = it }
+        advanceUntilIdle()
+
+        assertThat(switchedFilter).isEqualTo(ChatFeedFilter.All)
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.All)
+        assertThat(vm.uiState.value.pendingJump?.offset).isEqualTo(88)
+        assertThat(vm.uiState.value.pendingJump?.targetEntryId).isEqualTo("parent-in-all")
+
+        // Missing parent everywhere shows "Original message was deleted"
+        vm.jumpToReplyParent("missing-parent")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.errorMessage).isEqualTo("Original message was deleted")
+    }
+
+    @Test
+    fun editAttachments_keepsRemovesDeduplicatesAndSubmitsChangesOnSave() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val existingAtt1 = Attachment(
+            id = "att-keep",
+            entryId = "e-media",
+            localFilename = "media/keep.webp",
+            mimeType = "image/webp",
+            byteSize = 50_000L,
+            width = 800,
+            height = 600,
+            sha256 = "sha-keep",
+        )
+        val existingAtt2 = Attachment(
+            id = "att-drop",
+            entryId = "e-media",
+            localFilename = "media/drop.webp",
+            mimeType = "image/webp",
+            byteSize = 40_000L,
+            width = 800,
+            height = 600,
+            sha256 = "sha-drop",
+        )
+        val entryWithMedia = sampleEntry("e-media", "Caption").copy(
+            attachments = listOf(existingAtt1, existingAtt2),
+        )
+
+        vm.startEdit(entryWithMedia)
+        assertThat(vm.uiState.value.editingKeptAttachments).containsExactly(existingAtt1, existingAtt2).inOrder()
+        assertThat(vm.uiState.value.removedEditingAttachmentIds).isEmpty()
+
+        // Duplicate of kept attachment is ignored by sha256
+        mediaCompressor.nextResult = Result.success(
+            PendingAttachment(
+                localFilename = "media/dup.webp",
+                mimeType = "image/webp",
+                byteSize = 50_000L,
+                width = 800,
+                height = 600,
+                sha256 = "sha-keep",
+            ),
+        )
+        vm.onImageBytesReceived(byteArrayOf(1))
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.pendingAttachments).isEmpty()
+
+        // New unique image is added
+        val addedPending = PendingAttachment(
+            localFilename = "media/new.webp",
+            mimeType = "image/webp",
+            byteSize = 60_000L,
+            width = 1024,
+            height = 768,
+            sha256 = "sha-new",
+        )
+        mediaCompressor.nextResult = Result.success(addedPending)
+        vm.onImageBytesReceived(byteArrayOf(2))
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.pendingAttachments).containsExactly(addedPending)
+
+        // Remove one existing attachment & clear text -> still saveable because attachments remain
+        vm.removeEditingAttachment("att-drop")
+        vm.onComposerTextChanged("", 0)
+        assertThat(vm.uiState.value.editingKeptAttachments).containsExactly(existingAtt1)
+        assertThat(vm.uiState.value.removedEditingAttachmentIds).containsExactly("att-drop")
+
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        val editCall = entryRepo.detailedEditCalls.single()
+        assertThat(editCall.entryId).isEqualTo("e-media")
+        assertThat(editCall.addedAttachments).containsExactly(addedPending)
+        assertThat(editCall.removedAttachmentIds).containsExactly("att-drop")
+        assertThat(vm.uiState.value.editingEntry).isNull()
+        assertThat(vm.uiState.value.editingKeptAttachments).isEmpty()
+        assertThat(vm.uiState.value.removedEditingAttachmentIds).isEmpty()
+        assertThat(vm.uiState.value.pendingAttachments).isEmpty()
+    }
+
+    @Test
+    fun taskPriority_enforcesTaskRule_passesToCreate_andUpdatesTodoSortAndFilter() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        // Setting priority auto-enables composerIsTask
+        assertThat(vm.uiState.value.composerIsTask).isFalse()
+        vm.setComposerTaskPriority(TaskPriority.HIGH)
+        assertThat(vm.uiState.value.composerIsTask).isTrue()
+        assertThat(vm.uiState.value.composerTaskPriority).isEqualTo(TaskPriority.HIGH)
+
+        // Toggling task off clears priority back to NONE
+        vm.toggleComposerTask()
+        assertThat(vm.uiState.value.composerIsTask).isFalse()
+        assertThat(vm.uiState.value.composerTaskPriority).isEqualTo(TaskPriority.NONE)
+
+        // Create entry with MEDIUM priority
+        vm.setComposerTaskPriority(TaskPriority.MEDIUM)
+        vm.onComposerTextChanged("Prepare release", 15)
+        vm.sendOrSave()
+        advanceUntilIdle()
+
+        assertThat(entryRepo.createdCalls.single().taskStatus).isEqualTo(TaskStatus.TODO)
+        assertThat(entryRepo.createdCalls.single().taskPriority).isEqualTo(TaskPriority.MEDIUM)
+        assertThat(vm.uiState.value.composerTaskPriority).isEqualTo(TaskPriority.NONE)
+
+        // Direct priority update on existing entry
+        vm.setEntryTaskPriority("e-1", TaskPriority.LOW)
+        advanceUntilIdle()
+        assertThat(entryRepo.taskPriorityUpdates).containsExactly("e-1" to TaskPriority.LOW)
+
+        // Todo filter mode, priority filter, and sort order preserve each other
+        vm.setFeedFilter(ChatFeedFilter.Todos(mode = TodoFilterMode.OPEN))
+        vm.setTodoPriorityFilter(TaskPriority.HIGH)
+        vm.toggleTodoSortOrder()
+        vm.setTodoFilterMode(TodoFilterMode.ALL)
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(
+            ChatFeedFilter.Todos(
+                mode = TodoFilterMode.ALL,
+                priorityFilter = TaskPriority.HIGH,
+                sortOrder = TodoSortOrder.PRIORITY,
+            ),
+        )
+    }
+
+    @Test
+    fun startReply_copiesVisibleTagsAndCleansOnlyAutoCopiedTagsOnCancelSwitchOrDelete() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        // User manually selects alexWorkTag before replying
+        vm.toggleSelectedTag(alexWorkTag.id)
+        val hiddenAutoTag = EntryTag(
+            entryId = "parent-1",
+            tagId = "tag-hidden-auto",
+            tag = Tag(
+                id = "tag-hidden-auto",
+                fullPath = "auto/hidden",
+                leafName = "hidden",
+                rootCategory = TagRootCategory.AUTO,
+                colorToken = "auto",
+            ),
+            state = TagState.AUTO_HIDDEN,
+            updatedAtMs = 1L,
+        )
+        val parent1 = sampleEntry("parent-1", "First parent").copy(
+            tags = sampleEntry("parent-1", "First parent").tags + hiddenAutoTag,
+        )
+        vm.startReply(parent1)
+        // Copies lexTag (USER) but ignores hiddenAutoTag; keeps manual alexWorkTag
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(alexWorkTag.id, lexTag.id).inOrder()
+
+        // Switching to a second reply target replaces lexTag with journalProjectTag
+        val parent2 = sampleEntry("parent-2", "Second parent").copy(
+            tags = listOf(
+                EntryTag(
+                    entryId = "parent-2",
+                    tagId = journalProjectTag.id,
+                    tag = journalProjectTag,
+                    state = TagState.AUTO_PROMOTED,
+                    updatedAtMs = 1L,
+                ),
+            ),
+        )
+        vm.startReply(parent2)
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(alexWorkTag.id, journalProjectTag.id).inOrder()
+
+        // Canceling reply removes only auto-copied journalProjectTag, preserving manual alexWorkTag
+        vm.cancelReply()
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(alexWorkTag.id)
+
+        // Deleting the active reply target also strips its auto-copied tags
+        vm.startReply(parent1)
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(alexWorkTag.id, lexTag.id).inOrder()
+        vm.deleteEntry("parent-1")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.replyTarget).isNull()
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(alexWorkTag.id)
+    }
+
+    @Test
+    fun inlineTagSelectionDuringEdit_stripsTokenAndImmediatelyAttachesTagToEditedEntry() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val existing = sampleEntry("e-edit-tag", "Draft")
+        vm.startEdit(existing)
+        vm.onComposerTextChanged("Draft with @le", cursor = 14)
+        vm.onSelectTagSuggestion(lexTag)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.composerText).isEqualTo("Draft with ")
+        assertThat(tagRepo.setUserTagCalls).containsExactly(Triple("e-edit-tag", lexTag.id, true))
+    }
+
+    @Test
+    fun archiveAndUndo_andUnarchive_delegateToRepository() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.archiveEntry("e-arch")
+        advanceUntilIdle()
+        assertThat(entryRepo.archivedUpdates).containsExactly("e-arch" to true)
+        assertThat(vm.uiState.value.undoArchivedEntryId).isEqualTo("e-arch")
+
+        vm.undoArchive()
+        advanceUntilIdle()
+        assertThat(entryRepo.archivedUpdates).containsExactly("e-arch" to true, "e-arch" to false).inOrder()
+        assertThat(vm.uiState.value.undoArchivedEntryId).isNull()
+
+        vm.unarchiveEntry("e-arch-2")
+        advanceUntilIdle()
+        assertThat(entryRepo.archivedUpdates.last()).isEqualTo("e-arch-2" to false)
+
+        vm.setFeedFilter(ChatFeedFilter.Archived)
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.Archived)
+        assertThat(vm.uiState.value.composerIsTask).isFalse()
+    }
+
+    @Test
+    fun toggleHighlighted_andUpdateEntryMetadata_delegateWithTaskOnlyPriorityRule() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val note = sampleEntry("e-hl", "Highlight me").entry
+        vm.toggleHighlighted(note)
+        advanceUntilIdle()
+        assertThat(entryRepo.highlightUpdates).containsExactly("e-hl" to true)
+
+        // Updating metadata with TaskStatus.NONE forces TaskPriority.NONE
+        vm.updateEntryMetadata(
+            entryId = "e-hl",
+            createdAtMs = 1_700_000_000_000L,
+            zoneId = "Pacific/Honolulu",
+            taskStatus = TaskStatus.NONE,
+            taskPriority = TaskPriority.HIGH,
+            isHighlighted = true,
+            archivedAtMs = 1_700_000_500_000L,
+        )
+        advanceUntilIdle()
+        val call = entryRepo.metadataUpdates.single()
+        assertThat(call.entryId).isEqualTo("e-hl")
+        assertThat(call.zoneId).isEqualTo("Pacific/Honolulu")
+        assertThat(call.taskStatus).isEqualTo(TaskStatus.NONE)
+        assertThat(call.taskPriority).isEqualTo(TaskPriority.NONE)
+        assertThat(call.isHighlighted).isTrue()
+        assertThat(call.archivedAtMs).isEqualTo(1_700_000_500_000L)
+    }
+
+    @Test
+    fun showHiddenPlaceholderToggle_updatesSettingsAndOnlyIncludesHiddenInAllNotes() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isFalse()
+        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All to false)
+
+        vm.toggleShowHiddenPlaceholderMessages()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isTrue()
+        assertThat(settingsRepo.getSettings().showHiddenPlaceholderMessages).isTrue()
+        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All to true)
+
+        // Switching to TODOs must pass includeHiddenPlaceholders = false even when setting is true
+        vm.setFeedFilter(ChatFeedFilter.Todos())
+        advanceUntilIdle()
+        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.Todos() to false)
+
+        // Timeline buckets populate timelineIndex & fallback period meta
+        entryRepo.timelineBucketsFlow.value = listOf(
+            TimelineDateBucket("2026-11-24", 2),
+            TimelineDateBucket("2022-08-13", 3),
+        )
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.timelineIndex.totalCount).isEqualTo(5)
+        assertThat(vm.timelinePeriodMeta(3)?.monthLabel).isEqualTo("August 2022")
+    }
+
     private data class CreatedCall(
         val createdId: String,
         val bodyRaw: String,
         val userTagIds: List<String>,
         val replyToId: String?,
         val attachments: List<PendingAttachment>,
-        val taskStatus: io.github.k8242.threadlog.core.model.TaskStatus =
-            io.github.k8242.threadlog.core.model.TaskStatus.NONE,
+        val taskStatus: TaskStatus = TaskStatus.NONE,
+        val taskPriority: TaskPriority = TaskPriority.NONE,
         val nowMs: Long = 0L,
         val zoneId: String? = null,
+    )
+
+    private data class DetailedEditCall(
+        val entryId: String,
+        val newBodyRaw: String,
+        val addedAttachments: List<PendingAttachment>,
+        val removedAttachmentIds: Set<String>,
+    )
+
+    private data class MetadataUpdateCall(
+        val entryId: String,
+        val createdAtMs: Long,
+        val zoneId: String,
+        val taskStatus: TaskStatus,
+        val taskPriority: TaskPriority,
+        val isHighlighted: Boolean,
+        val archivedAtMs: Long?,
     )
 
     private class FakeEntryRepository : EntryRepository {
         private var nextSeq = 1
         val createdCalls = mutableListOf<CreatedCall>()
         val editedCalls = mutableListOf<Pair<String, String>>()
-        val taskStatusUpdates = mutableListOf<Pair<String, io.github.k8242.threadlog.core.model.TaskStatus>>()
+        val detailedEditCalls = mutableListOf<DetailedEditCall>()
+        val taskStatusUpdates = mutableListOf<Pair<String, TaskStatus>>()
+        val taskPriorityUpdates = mutableListOf<Pair<String, TaskPriority>>()
+        val highlightUpdates = mutableListOf<Pair<String, Boolean>>()
+        val archivedUpdates = mutableListOf<Pair<String, Boolean>>()
+        val metadataUpdates = mutableListOf<MetadataUpdateCall>()
         val reactionToggles = mutableListOf<Pair<String, String>>()
         val softDeletedIds = mutableListOf<String>()
         val restoredIds = mutableListOf<String>()
+        val observedTimelineQueries = mutableListOf<Pair<ChatFeedFilter, Boolean>>()
+        val entryOffsets = mutableMapOf<Pair<String, ChatFeedFilter>, Int>()
+        val dateOffsets = mutableMapOf<Pair<String, ChatFeedFilter>, Int>()
         val pendingAutoTagFlow = MutableStateFlow<List<EntryWithDetails>>(emptyList())
+        val timelineBucketsFlow = MutableStateFlow<List<TimelineDateBucket>>(emptyList())
 
         override fun observePagedEntries(): Flow<PagingData<EntryWithDetails>> =
             flowOf(PagingData.empty())
+
+        override fun observePagedEntries(
+            filter: ChatFeedFilter,
+            includeHiddenPlaceholders: Boolean,
+        ): Flow<PagingData<EntryWithDetails>> = flowOf(PagingData.empty())
 
         override fun observeEntry(entryId: String): Flow<EntryWithDetails?> = flowOf(null)
         override suspend fun getEntry(entryId: String): EntryWithDetails? = null
@@ -571,7 +950,27 @@ class ChatViewModelTest {
             pendingAttachments: List<PendingAttachment>,
             nowMs: Long,
             zoneId: String?,
-            taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
+            taskStatus: TaskStatus,
+        ): EntryWithDetails = createEntry(
+            bodyRaw = bodyRaw,
+            userTagIds = userTagIds,
+            replyToId = replyToId,
+            pendingAttachments = pendingAttachments,
+            nowMs = nowMs,
+            zoneId = zoneId,
+            taskStatus = taskStatus,
+            taskPriority = TaskPriority.NONE,
+        )
+
+        override suspend fun createEntry(
+            bodyRaw: String,
+            userTagIds: List<String>,
+            replyToId: String?,
+            pendingAttachments: List<PendingAttachment>,
+            nowMs: Long,
+            zoneId: String?,
+            taskStatus: TaskStatus,
+            taskPriority: TaskPriority,
         ): EntryWithDetails {
             val id = "created-${nextSeq++}"
             createdCalls += CreatedCall(
@@ -581,6 +980,7 @@ class ChatViewModelTest {
                 replyToId = replyToId,
                 attachments = pendingAttachments,
                 taskStatus = taskStatus,
+                taskPriority = taskPriority,
                 nowMs = nowMs,
                 zoneId = zoneId,
             )
@@ -608,6 +1008,7 @@ class ChatViewModelTest {
                     replyToId = replyToId,
                     contentHash = "hash-$id",
                     taskStatus = taskStatus,
+                    taskPriority = taskPriority,
                 ),
                 tags = emptyList(),
                 bookmarks = bookmarks,
@@ -628,10 +1029,54 @@ class ChatViewModelTest {
 
         override suspend fun setTaskStatus(
             entryId: String,
-            taskStatus: io.github.k8242.threadlog.core.model.TaskStatus,
+            taskStatus: TaskStatus,
             nowMs: Long,
         ) {
             taskStatusUpdates += entryId to taskStatus
+        }
+
+        override suspend fun setTaskPriority(
+            entryId: String,
+            taskPriority: TaskPriority,
+            nowMs: Long,
+        ) {
+            taskPriorityUpdates += entryId to taskPriority
+        }
+
+        override suspend fun setHighlighted(
+            entryId: String,
+            highlighted: Boolean,
+        ) {
+            highlightUpdates += entryId to highlighted
+        }
+
+        override suspend fun setArchived(
+            entryId: String,
+            archived: Boolean,
+            nowMs: Long,
+        ) {
+            archivedUpdates += entryId to archived
+        }
+
+        override suspend fun updateEntryMetadata(
+            entryId: String,
+            createdAtMs: Long,
+            zoneId: String,
+            taskStatus: TaskStatus,
+            taskPriority: TaskPriority,
+            isHighlighted: Boolean,
+            archivedAtMs: Long?,
+            nowMs: Long,
+        ) {
+            metadataUpdates += MetadataUpdateCall(
+                entryId = entryId,
+                createdAtMs = createdAtMs,
+                zoneId = zoneId,
+                taskStatus = taskStatus,
+                taskPriority = taskPriority,
+                isHighlighted = isHighlighted,
+                archivedAtMs = archivedAtMs,
+            )
         }
 
         override suspend fun toggleReaction(
@@ -646,8 +1091,28 @@ class ChatViewModelTest {
             entryId: String,
             newBodyRaw: String,
             nowMs: Long,
+        ): EntryWithDetails = editEntry(
+            entryId = entryId,
+            newBodyRaw = newBodyRaw,
+            nowMs = nowMs,
+            addedAttachments = emptyList(),
+            removedAttachmentIds = emptySet(),
+        )
+
+        override suspend fun editEntry(
+            entryId: String,
+            newBodyRaw: String,
+            nowMs: Long,
+            addedAttachments: List<PendingAttachment>,
+            removedAttachmentIds: Set<String>,
         ): EntryWithDetails {
             editedCalls += entryId to newBodyRaw
+            detailedEditCalls += DetailedEditCall(
+                entryId = entryId,
+                newBodyRaw = newBodyRaw,
+                addedAttachments = addedAttachments,
+                removedAttachmentIds = removedAttachmentIds,
+            )
             val bookmarks = if (newBodyRaw.contains("http")) {
                 listOf(
                     Bookmark(
@@ -684,6 +1149,26 @@ class ChatViewModelTest {
 
         override suspend fun undoSoftDelete(entryId: String) {
             restoredIds += entryId
+        }
+
+        override suspend fun findEntryOffset(
+            entryId: String,
+            filter: ChatFeedFilter,
+            includeHiddenPlaceholders: Boolean,
+        ): Int? = entryOffsets[entryId to filter]
+
+        override suspend fun findDateOffset(
+            localDate: String,
+            filter: ChatFeedFilter,
+            includeHiddenPlaceholders: Boolean,
+        ): Int? = dateOffsets[localDate to filter]
+
+        override fun observeTimelineDateBuckets(
+            filter: ChatFeedFilter,
+            includeHiddenPlaceholders: Boolean,
+        ): Flow<List<TimelineDateBucket>> {
+            observedTimelineQueries += filter to includeHiddenPlaceholders
+            return timelineBucketsFlow
         }
 
         override fun observeCompactSummaries(): Flow<List<CompactEntrySummary>> = flowOf(emptyList())
@@ -771,6 +1256,10 @@ class ChatViewModelTest {
 
         override suspend fun setShowHiddenAutoTagsInChat(show: Boolean) {
             state.value = state.value.copy(showHiddenAutoTagsInChat = show)
+        }
+
+        override suspend fun setShowHiddenPlaceholderMessages(show: Boolean) {
+            state.value = state.value.copy(showHiddenPlaceholderMessages = show)
         }
 
         override suspend fun setScheduledBackupCadence(cadence: BackupCadence) {

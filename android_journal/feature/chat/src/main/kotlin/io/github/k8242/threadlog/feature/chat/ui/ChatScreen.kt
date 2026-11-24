@@ -4,6 +4,7 @@
 package io.github.k8242.threadlog.feature.chat.ui
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,9 +21,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.VerticalAlignTop
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FilterChip
@@ -31,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -45,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +70,11 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.EntryWithDetails
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TodoFilterMode
+import io.github.k8242.threadlog.core.model.TodoSortOrder
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private sealed interface TagPickerTarget {
     data object Composer : TagPickerTarget
@@ -81,6 +94,7 @@ fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
     jumpToEntryId: String? = null,
     jumpToLocalDate: String? = null,
+    jumpNonce: Long = 0L,
     onOpenAutoTagReview: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenSearch: (String?) -> Unit = {},
@@ -91,9 +105,11 @@ fun ChatScreen(
     val lazyPagingItems = viewModel.pagedEntries.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     var fullscreenImagePath by remember { mutableStateOf<String?>(null) }
     var tagPickerTarget by remember { mutableStateOf<TagPickerTarget?>(null) }
+    var detailsTargetEntry by remember { mutableStateOf<EntryWithDetails?>(null) }
     var showBackdateDialog by remember { mutableStateOf(false) }
     var lastHandledJumpKey by remember { mutableStateOf<String?>(null) }
 
@@ -104,32 +120,50 @@ fun ChatScreen(
 
     // Scroll to index 0 whenever a newly created note lands in the paging snapshot so existing
     // notes smoothly scroll upward instead of staying key-anchored over the new item.
-    val newestSnapshotEntryId = lazyPagingItems.itemSnapshotList.items.firstOrNull()?.entry?.id
+    val newestSnapshotEntryId = lazyPagingItems.itemSnapshotList.firstOrNull()?.entry?.id
     LaunchedEffect(uiState.scrollToNewestEntryId, lazyPagingItems.itemCount, newestSnapshotEntryId) {
         val createdId = uiState.scrollToNewestEntryId ?: return@LaunchedEffect
-        val snapshot = lazyPagingItems.itemSnapshotList.items
-        val targetIndex = snapshot.indexOfFirst { it.entry.id == createdId }
+        val snapshot = lazyPagingItems.itemSnapshotList
+        val targetIndex = snapshot.indexOfFirst { it?.entry?.id == createdId }
         if (targetIndex >= 0) {
             listState.animateScrollToItem(targetIndex)
             viewModel.consumeScrollToNewest(createdId)
         }
     }
 
-    // Scroll to target entry or localDate once loaded in the paging snapshot.
-    LaunchedEffect(jumpToEntryId, jumpToLocalDate, lazyPagingItems.itemCount) {
-        val jumpKey = "${jumpToEntryId.orEmpty()}|${jumpToLocalDate.orEmpty()}"
-        if ((jumpToEntryId != null || jumpToLocalDate != null) && jumpKey != lastHandledJumpKey) {
-            val snapshot = lazyPagingItems.itemSnapshotList.items
-            val targetIndex = when {
-                jumpToEntryId != null -> snapshot.indexOfFirst { it.entry.id == jumpToEntryId }
-                jumpToLocalDate != null -> snapshot.indexOfFirst { it.entry.localDate == jumpToLocalDate }
-                else -> -1
-            }
-            if (targetIndex >= 0) {
-                lastHandledJumpKey = jumpKey
-                listState.animateScrollToItem(targetIndex)
-            }
+    // Trigger exact DB-offset lookup for external jumps ("Open in Chat" from Weekly, Calendar, Search, etc.).
+    LaunchedEffect(jumpToEntryId, jumpToLocalDate, jumpNonce) {
+        if (jumpToEntryId == null && jumpToLocalDate == null) return@LaunchedEffect
+        val jumpKey = "${jumpToEntryId.orEmpty()}|${jumpToLocalDate.orEmpty()}|$jumpNonce"
+        if (jumpKey != lastHandledJumpKey) {
+            lastHandledJumpKey = jumpKey
+            viewModel.setFeedFilter(activeFilter)
+            viewModel.resolveJumpTarget(
+                entryId = jumpToEntryId,
+                localDate = jumpToLocalDate,
+            )
         }
+    }
+
+    // Execute pending DB-offset jump once the matching filter's PagingData has loaded enough slots.
+    LaunchedEffect(
+        uiState.pendingJump,
+        uiState.activeFilter,
+        lazyPagingItems.itemCount,
+        lazyPagingItems.loadState.refresh,
+    ) {
+        val pending = uiState.pendingJump ?: return@LaunchedEffect
+        if (uiState.activeFilter != pending.targetFilter) return@LaunchedEffect
+        if (lazyPagingItems.loadState.refresh is LoadState.Loading) return@LaunchedEffect
+        if (lazyPagingItems.itemCount <= pending.offset) return@LaunchedEffect
+
+        val distance = abs(pending.offset - listState.firstVisibleItemIndex)
+        if (distance <= 30) {
+            listState.animateScrollToItem(pending.offset)
+        } else {
+            listState.scrollToItem(pending.offset)
+        }
+        viewModel.consumePendingJump(pending.nonce)
     }
 
     // Undo soft-delete snackbar
@@ -149,6 +183,23 @@ fun ChatScreen(
         }
     }
 
+    // Undo archive snackbar
+    LaunchedEffect(uiState.undoArchivedEntryId) {
+        val archivedId = uiState.undoArchivedEntryId ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "Entry archived",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            viewModel.undoArchive()
+        } else {
+            if (uiState.undoArchivedEntryId == archivedId) {
+                viewModel.clearUndoArchive()
+            }
+        }
+    }
+
     // Error feedback snackbar
     LaunchedEffect(uiState.errorMessage) {
         val error = uiState.errorMessage ?: return@LaunchedEffect
@@ -160,7 +211,8 @@ fun ChatScreen(
     }
 
     // Sticky top period pill derived from the visually topmost item (largest index in reverseLayout = true)
-    val stickyPeriodMeta by remember(lazyPagingItems, uiState.weekStart) {
+    // with ChatTimelineIndex fallback when peeking an unloaded placeholder mid-jump.
+    val stickyPeriodMeta by remember(lazyPagingItems, uiState.weekStart, uiState.timelineIndex) {
         derivedStateOf {
             val topVisibleIndex = listState.layoutInfo.visibleItemsInfo
                 .maxByOrNull { it.index }
@@ -169,9 +221,29 @@ fun ChatScreen(
             if (topVisibleIndex !in 0 until lazyPagingItems.itemCount) {
                 return@derivedStateOf null
             }
-            val topEntry = lazyPagingItems.peek(topVisibleIndex) ?: return@derivedStateOf null
-            viewModel.dividerMeta(topEntry.entry.createdAtMs, topEntry.entry.zoneId)
+            val topEntry = lazyPagingItems.peek(topVisibleIndex)
+            if (topEntry != null) {
+                viewModel.dividerMeta(topEntry.entry.createdAtMs, topEntry.entry.zoneId)
+            } else {
+                viewModel.timelinePeriodMeta(topVisibleIndex)
+            }
         }
+    }
+
+    val totalItemCount = lazyPagingItems.itemCount
+    val isAtOldest by remember(totalItemCount) {
+        derivedStateOf {
+            if (totalItemCount <= 1) {
+                true
+            } else {
+                val maxVisible = listState.layoutInfo.visibleItemsInfo.maxByOrNull { it.index }?.index ?: 0
+                maxVisible >= totalItemCount - 1
+            }
+        }
+    }
+    val showJumpToBeginning = totalItemCount > 1 && !isAtOldest
+    val showJumpToEnd by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 2 }
     }
 
     Scaffold(
@@ -182,20 +254,42 @@ fun ChatScreen(
                 CompactChatHeaderBar(
                     activeFilter = uiState.activeFilter,
                     pendingAutoTagCount = uiState.pendingAutoTagCount,
+                    showHiddenPlaceholderMessages = uiState.showHiddenPlaceholderMessages,
+                    showJumpToBeginning = showJumpToBeginning,
                     onOpenDrawer = onOpenDrawer,
+                    onToggleShowHiddenPlaceholders = viewModel::toggleShowHiddenPlaceholderMessages,
+                    onJumpToBeginning = {
+                        val oldestIdx = (lazyPagingItems.itemCount - 1).coerceAtLeast(0)
+                        scope.launch {
+                            listState.scrollToItem(oldestIdx)
+                        }
+                    },
                     onClearFilter = {
                         viewModel.setFeedFilter(ChatFeedFilter.All)
                         onFilterChanged(ChatFeedFilter.All)
                     },
                 )
-                if (uiState.activeFilter is ChatFeedFilter.Todos) {
+                val todosFilter = uiState.activeFilter as? ChatFeedFilter.Todos
+                if (todosFilter != null) {
                     TodoFilterStrip(
-                        currentMode = (uiState.activeFilter as ChatFeedFilter.Todos).mode,
+                        todosFilter = todosFilter,
                         openCount = uiState.openTodoCount,
                         completedCount = uiState.completedTodoCount,
                         onSelectMode = { mode ->
                             viewModel.setTodoFilterMode(mode)
-                            onFilterChanged(ChatFeedFilter.Todos(mode))
+                            onFilterChanged(todosFilter.copy(mode = mode))
+                        },
+                        onSelectPriority = { priority ->
+                            viewModel.setTodoPriorityFilter(priority)
+                            onFilterChanged(todosFilter.copy(priorityFilter = priority))
+                        },
+                        onToggleSortOrder = {
+                            val nextSort = when (todosFilter.sortOrder) {
+                                TodoSortOrder.NEWEST -> TodoSortOrder.PRIORITY
+                                TodoSortOrder.PRIORITY -> TodoSortOrder.NEWEST
+                            }
+                            viewModel.toggleTodoSortOrder()
+                            onFilterChanged(todosFilter.copy(sortOrder = nextSort))
                         },
                     )
                 }
@@ -211,10 +305,12 @@ fun ChatScreen(
                 onCreateTriggeredTag = viewModel::createAndInsertTriggeredTag,
                 onToggleSelectedTag = viewModel::toggleSelectedTag,
                 onToggleComposerTask = viewModel::toggleComposerTask,
+                onSetComposerTaskPriority = viewModel::setComposerTaskPriority,
                 onOpenBackdatePicker = { showBackdateDialog = true },
                 onClearComposerBackdate = viewModel::clearComposerBackdate,
                 onImageBytesReceived = viewModel::onImageBytesReceived,
                 onRemovePendingAttachment = viewModel::removePendingAttachment,
+                onRemoveEditingAttachment = viewModel::removeEditingAttachment,
                 onCancelReply = viewModel::cancelReply,
                 onCancelEdit = viewModel::cancelEdit,
                 onMaskCredentials = viewModel::maskCredentialsInComposer,
@@ -248,7 +344,11 @@ fun ChatScreen(
                         count = lazyPagingItems.itemCount,
                         key = lazyPagingItems.itemKey { it.entry.id },
                     ) { index ->
-                        val item = lazyPagingItems[index] ?: return@items
+                        val item = lazyPagingItems[index]
+                        if (item == null) {
+                            MessageBubblePlaceholder()
+                            return@items
+                        }
                         val olderItem = if (index + 1 < lazyPagingItems.itemCount) {
                             lazyPagingItems.peek(index + 1)
                         } else {
@@ -296,11 +396,30 @@ fun ChatScreen(
                                 tagDisplayLabels = uiState.tagDisplayLabels,
                                 showHiddenAutoTags = uiState.showHiddenAutoTags,
                                 resolveAttachmentPath = viewModel::resolveAttachmentPath,
+                                isJumpHighlighted = uiState.highlightedEntryId == item.entry.id,
                                 onReply = { viewModel.startReply(item) },
                                 onEdit = { viewModel.startEdit(item) },
                                 onManageTags = { tagPickerTarget = TagPickerTarget.ExistingEntry(item) },
                                 onToggleTask = { viewModel.toggleNoteTask(item.entry) },
                                 onToggleTaskDone = { viewModel.toggleTaskCompleted(item.entry) },
+                                onSetTaskPriority = { priority ->
+                                    viewModel.setEntryTaskPriority(item.entry.id, priority)
+                                },
+                                onToggleHighlight = { viewModel.toggleHighlighted(item.entry) },
+                                onToggleArchive = {
+                                    if (item.entry.isArchived) {
+                                        viewModel.unarchiveEntry(item.entry.id)
+                                    } else {
+                                        viewModel.archiveEntry(item.entry.id)
+                                    }
+                                },
+                                onOpenDetails = { detailsTargetEntry = item },
+                                onReplyPreviewClick = { parentEntryId ->
+                                    viewModel.jumpToReplyParent(
+                                        entryId = parentEntryId,
+                                        onFilterChanged = onFilterChanged,
+                                    )
+                                },
                                 onToggleReaction = { emoji -> viewModel.toggleReaction(item.entry.id, emoji) },
                                 onDelete = { viewModel.deleteEntry(item.entry.id) },
                                 onToggleBookmarkCollapsed = viewModel::toggleBookmarkCollapsed,
@@ -334,6 +453,39 @@ fun ChatScreen(
                             .align(Alignment.TopCenter)
                             .padding(top = 6.dp),
                     )
+                }
+
+                // Google Photos-style right-edge dated side scrollbar
+                ChatTimelineScrubber(
+                    listState = listState,
+                    timelineIndex = uiState.timelineIndex,
+                    totalCount = totalItemCount,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+
+                // Jump to End (newest, index 0) floating button when scrolled up into history
+                if (showJumpToEnd) {
+                    SmallFloatingActionButton(
+                        onClick = {
+                            scope.launch {
+                                if (listState.firstVisibleItemIndex <= 30) {
+                                    listState.animateScrollToItem(0)
+                                } else {
+                                    listState.scrollToItem(0)
+                                }
+                            }
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 12.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.KeyboardArrowDown,
+                            contentDescription = "Jump to latest",
+                        )
+                    }
                 }
             }
 
@@ -372,6 +524,29 @@ fun ChatScreen(
         )
     }
 
+    // Extra Message Details sheet (view & edit metadata including timezone)
+    detailsTargetEntry?.let { target ->
+        val liveEntry = lazyPagingItems.itemSnapshotList
+            .firstOrNull { it?.entry?.id == target.entry.id }
+            ?: target
+        MessageDetailsSheet(
+            entryWithDetails = liveEntry,
+            onSave = { createdAtMs, zoneId, taskStatus, taskPriority, isHighlighted, archivedAtMs ->
+                viewModel.updateEntryMetadata(
+                    entryId = liveEntry.entry.id,
+                    createdAtMs = createdAtMs,
+                    zoneId = zoneId,
+                    taskStatus = taskStatus,
+                    taskPriority = taskPriority,
+                    isHighlighted = isHighlighted,
+                    archivedAtMs = archivedAtMs,
+                )
+                detailsTargetEntry = null
+            },
+            onDismiss = { detailsTargetEntry = null },
+        )
+    }
+
     // Quick-Tag Picker modal bottom sheet (for composer or existing entry)
     when (val target = tagPickerTarget) {
         null -> Unit
@@ -393,8 +568,8 @@ fun ChatScreen(
 
         is TagPickerTarget.ExistingEntry -> {
             // Re-read the latest visible tag IDs from the paging snapshot if available
-            val liveEntry = lazyPagingItems.itemSnapshotList.items
-                .firstOrNull { it.entry.id == target.entry.entry.id }
+            val liveEntry = lazyPagingItems.itemSnapshotList
+                .firstOrNull { it?.entry?.id == target.entry.entry.id }
                 ?: target.entry
             val attachedIds = liveEntry.visibleTags.map { it.tagId }.toSet()
 
@@ -426,12 +601,17 @@ fun ChatScreen(
 private fun CompactChatHeaderBar(
     activeFilter: ChatFeedFilter,
     pendingAutoTagCount: Int,
+    showHiddenPlaceholderMessages: Boolean,
+    showJumpToBeginning: Boolean,
     onOpenDrawer: () -> Unit,
+    onToggleShowHiddenPlaceholders: () -> Unit,
+    onJumpToBeginning: () -> Unit,
     onClearFilter: () -> Unit,
 ) {
     val title = when (activeFilter) {
         ChatFeedFilter.All -> "ThreadLog"
         is ChatFeedFilter.Todos -> "TODOs"
+        ChatFeedFilter.Archived -> "Archived"
         is ChatFeedFilter.TagSubtree -> when {
             activeFilter.fullPath.startsWith("people/", ignoreCase = true) ||
                 activeFilter.fullPath.equals("people", ignoreCase = true) -> "@${activeFilter.displayLabel}"
@@ -443,6 +623,7 @@ private fun CompactChatHeaderBar(
     val subtitle = when (activeFilter) {
         ChatFeedFilter.All -> null
         is ChatFeedFilter.Todos -> "Task notes"
+        ChatFeedFilter.Archived -> "Archived notes"
         is ChatFeedFilter.TagSubtree -> activeFilter.fullPath
     }
 
@@ -462,7 +643,7 @@ private fun CompactChatHeaderBar(
                     .height(48.dp)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 IconButton(onClick = onOpenDrawer) {
                     if (pendingAutoTagCount > 0) {
@@ -500,6 +681,40 @@ private fun CompactChatHeaderBar(
                     }
                 }
 
+                if (activeFilter == ChatFeedFilter.All) {
+                    IconButton(onClick = onToggleShowHiddenPlaceholders) {
+                        Icon(
+                            imageVector = if (showHiddenPlaceholderMessages) {
+                                Icons.Outlined.Visibility
+                            } else {
+                                Icons.Outlined.VisibilityOff
+                            },
+                            contentDescription = if (showHiddenPlaceholderMessages) {
+                                "Hide omitted/deleted messages"
+                            } else {
+                                "Show hidden messages"
+                            },
+                            tint = if (showHiddenPlaceholderMessages) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+
+                if (showJumpToBeginning) {
+                    IconButton(onClick = onJumpToBeginning) {
+                        Icon(
+                            imageVector = Icons.Outlined.VerticalAlignTop,
+                            contentDescription = "Jump to oldest",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+
                 if (activeFilter != ChatFeedFilter.All) {
                     TextButton(onClick = onClearFilter) {
                         Icon(
@@ -521,37 +736,98 @@ private fun CompactChatHeaderBar(
 
 @Composable
 private fun TodoFilterStrip(
-    currentMode: TodoFilterMode,
+    todosFilter: ChatFeedFilter.Todos,
     openCount: Int,
     completedCount: Int,
     onSelectMode: (TodoFilterMode) -> Unit,
+    onSelectPriority: (TaskPriority?) -> Unit,
+    onToggleSortOrder: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            FilterChip(
-                selected = currentMode == TodoFilterMode.OPEN,
-                onClick = { onSelectMode(TodoFilterMode.OPEN) },
-                label = { Text("Open ($openCount)") },
-            )
-            FilterChip(
-                selected = currentMode == TodoFilterMode.DONE,
-                onClick = { onSelectMode(TodoFilterMode.DONE) },
-                label = { Text("Done ($completedCount)") },
-            )
-            FilterChip(
-                selected = currentMode == TodoFilterMode.ALL,
-                onClick = { onSelectMode(TodoFilterMode.ALL) },
-                label = { Text("All (${openCount + completedCount})") },
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = todosFilter.mode == TodoFilterMode.OPEN,
+                    onClick = { onSelectMode(TodoFilterMode.OPEN) },
+                    label = { Text("Open ($openCount)", style = MaterialTheme.typography.labelSmall) },
+                )
+                FilterChip(
+                    selected = todosFilter.mode == TodoFilterMode.DONE,
+                    onClick = { onSelectMode(TodoFilterMode.DONE) },
+                    label = { Text("Done ($completedCount)", style = MaterialTheme.typography.labelSmall) },
+                )
+                FilterChip(
+                    selected = todosFilter.mode == TodoFilterMode.ALL,
+                    onClick = { onSelectMode(TodoFilterMode.ALL) },
+                    label = { Text("All (${openCount + completedCount})", style = MaterialTheme.typography.labelSmall) },
+                )
+                FilterChip(
+                    selected = todosFilter.sortOrder == TodoSortOrder.PRIORITY,
+                    onClick = onToggleSortOrder,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.Sort,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = if (todosFilter.sortOrder == TodoSortOrder.PRIORITY) {
+                                "Sort: Priority"
+                            } else {
+                                "Sort: Newest"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                listOf<Pair<TaskPriority?, String>>(
+                    null to "All",
+                    TaskPriority.HIGH to "High",
+                    TaskPriority.MEDIUM to "Med",
+                    TaskPriority.LOW to "Low",
+                    TaskPriority.NONE to "None",
+                ).forEach { (priority, label) ->
+                    val isSelected = todosFilter.priorityFilter == priority
+                    val accentColor = priority?.takeIf { it != TaskPriority.NONE }?.let { taskPriorityColor(it) }
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onSelectPriority(priority) },
+                        label = {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = accentColor ?: MaterialTheme.colorScheme.onSurface,
+                            )
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -597,6 +873,11 @@ private fun EmptyChatState(
         ChatFeedFilter.All -> {
             "Your ThreadLog is ready" to
                 "Capture thoughts, links, and photos like messaging yourself. Use @people and #tags anytime."
+        }
+
+        ChatFeedFilter.Archived -> {
+            "No archived notes" to
+                "Archive notes from any message's menu to tuck them away here."
         }
 
         is ChatFeedFilter.Todos -> {

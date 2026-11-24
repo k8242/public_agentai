@@ -22,6 +22,7 @@ import io.github.k8242.threadlog.core.model.RuleMatchType
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.parser.ContentHasher
 import kotlinx.serialization.encodeToString
@@ -106,6 +107,9 @@ internal object EntryContentHasher {
         attachmentSha256s: Collection<String>,
         taskStatus: TaskStatus = TaskStatus.NONE,
         reactions: Collection<String> = emptyList(),
+        taskPriority: TaskPriority = TaskPriority.NONE,
+        isHighlighted: Boolean = false,
+        isArchived: Boolean = false,
     ): String {
         val canonical = buildString {
             append("v1\n")
@@ -123,6 +127,15 @@ internal object EntryContentHasher {
             val cleanedReactions = reactions.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
             if (cleanedReactions.isNotEmpty()) {
                 append("\nreactions=").append(cleanedReactions.joinToString(","))
+            }
+            if (taskPriority != TaskPriority.NONE) {
+                append("\npriority=").append(taskPriority.name)
+            }
+            if (isHighlighted) {
+                append("\nhighlighted=true")
+            }
+            if (isArchived) {
+                append("\narchived=true")
             }
         }
         return ContentHasher.sha256Hex(canonical)
@@ -144,6 +157,9 @@ internal fun EntryEntity.toDomain(): Entry =
         deletedAtMs = deletedAtMs,
         taskStatus = runCatching { TaskStatus.valueOf(taskStatus) }.getOrDefault(TaskStatus.NONE),
         reactions = ReactionsJsonCodec.decode(reactionsJson),
+        taskPriority = runCatching { TaskPriority.valueOf(taskPriority) }.getOrDefault(TaskPriority.NONE),
+        isHighlighted = isHighlighted,
+        archivedAtMs = archivedAtMs,
     )
 
 internal fun TagEntity.toDomain(): Tag =
@@ -222,10 +238,15 @@ internal fun CompactEntrySummaryProjection.toDomain(): CompactEntrySummary =
         hasAttachments = hasAttachments,
         hasBookmarks = hasBookmarks,
         hasCodeBlock = hasCodeBlock,
+        taskStatus = runCatching { TaskStatus.valueOf(taskStatus) }.getOrDefault(TaskStatus.NONE),
+        taskPriority = runCatching { TaskPriority.valueOf(taskPriority) }.getOrDefault(TaskPriority.NONE),
+        isHighlighted = isHighlighted,
     )
 
 internal fun CalendarDayCountProjection.toDomain(): CalendarDayCount =
     CalendarDayCount(
         localDate = localDate,
         entryCount = entryCount,
+        openTodoCount = openTodoCount,
+        completedTodoCount = completedTodoCount,
     )

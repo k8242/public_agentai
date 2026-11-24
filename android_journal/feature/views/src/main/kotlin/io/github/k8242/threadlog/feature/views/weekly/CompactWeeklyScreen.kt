@@ -8,7 +8,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.UnfoldLess
@@ -52,15 +56,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.k8242.threadlog.core.model.CompactEntrySummary
 import io.github.k8242.threadlog.core.model.EntryWithDetails
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.feature.views.common.BookmarkDomainPill
+import io.github.k8242.threadlog.feature.views.common.CompactTaskIndicator
 import io.github.k8242.threadlog.feature.views.common.LeafTagChip
+import io.github.k8242.threadlog.feature.views.common.TaskStatusBadge
+import io.github.k8242.threadlog.feature.views.common.highlightBubbleColor
+import io.github.k8242.threadlog.feature.views.common.priorityTrimColor
 import io.github.k8242.threadlog.feature.views.common.sanitizeSingleLinePreview
 
 /**
@@ -296,10 +306,19 @@ private fun CompactEntryRow(
     onOpenEntryInChat: () -> Unit,
     onOpenContextWindow: () -> Unit,
 ) {
-    val sanitizedPreview = sanitizeSingleLinePreview(item.summary.preview140)
+    val summary = item.summary
+    val sanitizedPreview = sanitizeSingleLinePreview(summary.preview140)
+    val isDark = isSystemInDarkTheme()
+    val rowBackgroundModifier = if (summary.isHighlighted) {
+        Modifier.background(highlightBubbleColor(isDark))
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(rowBackgroundModifier)
             .clickable(onClick = onToggleExpand),
     ) {
         Row(
@@ -316,15 +335,31 @@ private fun CompactEntryRow(
                 maxLines = 1,
                 modifier = Modifier.widthIn(min = 56.dp),
             )
+            if (summary.isTask) {
+                CompactTaskIndicator(
+                    taskStatus = summary.taskStatus,
+                    taskPriority = summary.taskPriority,
+                )
+            }
             Text(
                 text = sanitizedPreview.ifEmpty { "(Attachment)" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    textDecoration = if (summary.isTaskDone) {
+                        TextDecoration.LineThrough
+                    } else {
+                        null
+                    },
+                ),
+                color = if (summary.isTaskDone) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (item.summary.hasAttachments) {
+            if (summary.hasAttachments) {
                 Icon(
                     imageVector = Icons.Outlined.AttachFile,
                     contentDescription = "Has attachment",
@@ -332,7 +367,7 @@ private fun CompactEntryRow(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (item.summary.hasBookmarks) {
+            if (summary.hasBookmarks) {
                 Icon(
                     imageVector = Icons.Outlined.Link,
                     contentDescription = "Has bookmark",
@@ -340,7 +375,7 @@ private fun CompactEntryRow(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (item.summary.hasCodeBlock) {
+            if (summary.hasCodeBlock) {
                 Icon(
                     imageVector = Icons.Outlined.Code,
                     contentDescription = "Has code block",
@@ -366,6 +401,7 @@ private fun CompactEntryRow(
             exit = shrinkVertically() + fadeOut(),
         ) {
             ExpandedEntryDetailsCard(
+                summary = summary,
                 details = item.expandedDetails,
                 tagDisplayLabels = tagDisplayLabels,
                 onOpenEntryInChat = onOpenEntryInChat,
@@ -378,17 +414,37 @@ private fun CompactEntryRow(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExpandedEntryDetailsCard(
+    summary: CompactEntrySummary,
     details: EntryWithDetails?,
     tagDisplayLabels: Map<String, String>,
     onOpenEntryInChat: () -> Unit,
     onOpenContextWindow: () -> Unit,
 ) {
+    val isDark = isSystemInDarkTheme()
+    val priorityColor = if (summary.isTask) {
+        priorityTrimColor(summary.taskPriority, isDark)
+    } else {
+        null
+    }
+    val cardContainerColor = if (summary.isHighlighted) {
+        highlightBubbleColor(isDark)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val cardBorder = priorityColor?.let { color ->
+        BorderStroke(
+            width = if (summary.taskPriority == TaskPriority.LOW) 1.25.dp else 1.5.dp,
+            color = color,
+        )
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = cardContainerColor,
+        border = cardBorder,
     ) {
         Column(
             modifier = Modifier
@@ -396,13 +452,30 @@ private fun ExpandedEntryDetailsCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (summary.isTask) {
+                TaskStatusBadge(
+                    taskStatus = summary.taskStatus,
+                    taskPriority = summary.taskPriority,
+                )
+            }
+
             if (details == null) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             } else {
                 Text(
                     text = details.entry.bodyPlain,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        textDecoration = if (summary.isTaskDone) {
+                            TextDecoration.LineThrough
+                        } else {
+                            null
+                        },
+                    ),
+                    color = if (summary.isTaskDone) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 )
 
                 val visibleTags = details.visibleTags

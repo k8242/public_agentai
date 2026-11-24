@@ -14,6 +14,7 @@ import io.github.k8242.threadlog.core.model.HybridSearchResult
 import io.github.k8242.threadlog.core.model.SearchHit
 import io.github.k8242.threadlog.core.model.TagState
 import io.github.k8242.threadlog.core.model.contract.SearchRepository
+import io.github.k8242.threadlog.core.parser.HiddenPlaceholderMatcher
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,6 +29,18 @@ class DefaultSearchRepository @Inject constructor(
     override suspend fun search(
         query: String,
         includeHiddenAutoTags: Boolean,
+        nowMs: Long,
+    ): HybridSearchResult = search(
+        query = query,
+        includeHiddenAutoTags = includeHiddenAutoTags,
+        includeArchived = false,
+        nowMs = nowMs,
+    )
+
+    override suspend fun search(
+        query: String,
+        includeHiddenAutoTags: Boolean,
+        includeArchived: Boolean,
         nowMs: Long,
     ): HybridSearchResult {
         val cutoffEpochMs = nowMs - HybridSearchResult.TIER_A_WINDOW_MS
@@ -60,10 +73,29 @@ class DefaultSearchRepository @Inject constructor(
             val snippetByEntryId = rawMatches.associate { it.entryId to it.snippetMarked }
             val matchedIds = rawMatches.map { it.entryId }.distinct()
 
-            val activeEntries = matchedIds
+            val nonDeletedEntries = matchedIds
                 .chunked(SQLITE_BIND_CHUNK_SIZE)
                 .flatMap { entryDao.getByIds(it) }
-                .filter { it.deletedAtMs == null }
+                .filter { entry ->
+                    entry.deletedAtMs == null && (includeArchived || entry.archivedAtMs == null)
+                }
+
+            val placeholderCandidates = nonDeletedEntries
+                .filter { HiddenPlaceholderMatcher.isHiddenPlaceholder(it.bodyPlain) }
+                .map { it.id }
+            val attachedPlaceholderIds = if (placeholderCandidates.isEmpty()) {
+                emptySet()
+            } else {
+                placeholderCandidates
+                    .chunked(SQLITE_BIND_CHUNK_SIZE)
+                    .flatMap { entryDao.getEntryIdsWithAttachments(it) }
+                    .toHashSet()
+            }
+
+            val activeEntries = nonDeletedEntries.filter { entry ->
+                !HiddenPlaceholderMatcher.isHiddenPlaceholder(entry.bodyPlain) ||
+                    entry.id in attachedPlaceholderIds
+            }
 
             if (activeEntries.isEmpty()) {
                 return@inReadTransaction HybridSearchResult(

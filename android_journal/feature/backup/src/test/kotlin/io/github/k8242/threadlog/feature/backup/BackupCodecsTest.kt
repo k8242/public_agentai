@@ -365,24 +365,49 @@ class BackupCodecsTest {
     @Test
     fun csvCodec_roundTripsTaskStatusAndReactions_andDefaultsMissingLegacyColumns() {
         val original = sampleWorkbook()
-        val withTodo = original.copy(
+        val withMetadata = original.copy(
             entries = original.entries.mapIndexed { idx, row ->
                 if (idx == 0) {
-                    row.copy(taskStatus = "TODO", reactions = listOf("\uD83D\uDC4D", "\uD83D\uDD25"))
+                    row.copy(
+                        taskStatus = "TODO",
+                        reactions = listOf("\uD83D\uDC4D", "\uD83D\uDD25"),
+                        taskPriority = "HIGH",
+                        isHighlighted = true,
+                        archivedAtIso = null,
+                    )
                 } else {
-                    row.copy(taskStatus = "DONE", reactions = listOf("\u2705"))
+                    row.copy(
+                        taskStatus = "DONE",
+                        reactions = listOf("\u2705"),
+                        taskPriority = "LOW",
+                        isHighlighted = false,
+                        archivedAtIso = "2026-11-21T08:00:00Z",
+                    )
                 }
             },
         )
         val out = ByteArrayOutputStream()
-        csvCodec.write(withTodo, out)
+        csvCodec.write(withMetadata, out)
         val imported = csvCodec.read(ByteArrayInputStream(out.toByteArray()))
         assertThat(imported.entries[0].taskStatus).isEqualTo("TODO")
         assertThat(imported.entries[0].reactions).containsExactly("\uD83D\uDC4D", "\uD83D\uDD25").inOrder()
+        assertThat(imported.entries[0].taskPriority).isEqualTo("HIGH")
+        assertThat(imported.entries[0].isHighlighted).isTrue()
+        assertThat(imported.entries[0].archivedAtIso).isNull()
         if (imported.entries.size > 1) {
             assertThat(imported.entries[1].taskStatus).isEqualTo("DONE")
             assertThat(imported.entries[1].reactions).containsExactly("\u2705")
+            assertThat(imported.entries[1].taskPriority).isEqualTo("LOW")
+            assertThat(imported.entries[1].isHighlighted).isFalse()
+            assertThat(imported.entries[1].archivedAtIso).isEqualTo("2026-11-21T08:00:00Z")
         }
+
+        val xlsxOut = ByteArrayOutputStream()
+        xlsxCodec.write(withMetadata, xlsxOut)
+        val xlsxImported = xlsxCodec.read(ByteArrayInputStream(xlsxOut.toByteArray()))
+        assertThat(xlsxImported.entries[0].taskPriority).isEqualTo("HIGH")
+        assertThat(xlsxImported.entries[0].isHighlighted).isTrue()
+        assertThat(xlsxImported.entries[1].archivedAtIso).isEqualTo("2026-11-21T08:00:00Z")
 
         val legacyCsv = """
             entry_id,created_at_iso,zone_id,body_raw,visible_tags,hidden_auto_tags,rejected_tags,bookmarks_pipe,media_drive_ids,reply_to_id,updated_at_iso,deleted
@@ -392,6 +417,9 @@ class BackupCodecsTest {
         assertThat(legacyImported.entries).hasSize(1)
         assertThat(legacyImported.entries[0].taskStatus).isEqualTo("NONE")
         assertThat(legacyImported.entries[0].reactions).isEmpty()
+        assertThat(legacyImported.entries[0].taskPriority).isEqualTo("NONE")
+        assertThat(legacyImported.entries[0].isHighlighted).isFalse()
+        assertThat(legacyImported.entries[0].archivedAtIso).isNull()
     }
 
     private class InMemoryMediaStorage : MediaStorage {

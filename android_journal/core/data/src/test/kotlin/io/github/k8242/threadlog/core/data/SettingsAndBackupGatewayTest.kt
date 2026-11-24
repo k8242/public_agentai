@@ -78,6 +78,9 @@ class SettingsAndBackupGatewayTest {
             repo1.setShowHiddenAutoTagsInChat(true)
             assertThat(awaitItem().showHiddenAutoTagsInChat).isTrue()
 
+            repo1.setShowHiddenPlaceholderMessages(true)
+            assertThat(awaitItem().showHiddenPlaceholderMessages).isTrue()
+
             repo1.setScheduledBackupCadence(BackupCadence.DAILY)
             assertThat(awaitItem().scheduledBackupCadence).isEqualTo(BackupCadence.DAILY)
 
@@ -105,6 +108,7 @@ class SettingsAndBackupGatewayTest {
         // Re-verify persisted deviceId and theme prefs stay identical on subsequent reads.
         val secondRead = repo1.getSettings()
         assertThat(secondRead.deviceId).isEqualTo(initial.deviceId)
+        assertThat(secondRead.showHiddenPlaceholderMessages).isTrue()
         assertThat(secondRead.linkedSpreadsheetId).isEqualTo("sheet-123")
         assertThat(secondRead.colorScheme)
             .isEqualTo(io.github.k8242.threadlog.core.model.AppColorScheme.WHATSAPP)

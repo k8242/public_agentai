@@ -36,7 +36,7 @@ import io.github.k8242.threadlog.core.data.local.entity.TagEntity
         AutoTagRuleEntity::class,
         SyncEntryHashEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ThreadLogDatabase : RoomDatabase() {
@@ -74,6 +74,26 @@ abstract class ThreadLogDatabase : RoomDatabase() {
             override fun migrate(connection: SQLiteConnection) {
                 connection.execSQL(
                     "ALTER TABLE entries ADD COLUMN reactions_json TEXT NOT NULL DEFAULT '[]'",
+                )
+            }
+        }
+
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE entries ADD COLUMN task_priority TEXT NOT NULL DEFAULT 'NONE'",
+                )
+                connection.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_entries_task_priority ON entries (task_priority)",
+                )
+                connection.execSQL(
+                    "ALTER TABLE entries ADD COLUMN archived_at_ms INTEGER DEFAULT NULL",
+                )
+                connection.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_entries_archived_at_ms ON entries (archived_at_ms)",
+                )
+                connection.execSQL(
+                    "ALTER TABLE entries ADD COLUMN is_highlighted INTEGER NOT NULL DEFAULT 0",
                 )
             }
         }

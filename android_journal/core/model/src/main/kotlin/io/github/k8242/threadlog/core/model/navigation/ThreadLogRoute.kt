@@ -11,6 +11,7 @@ sealed interface ThreadLogRoute {
     data class Chat(
         val jumpToEntryId: String? = null,
         val jumpToLocalDate: String? = null,
+        val jumpNonce: Long = 0L,
     ) : ThreadLogRoute
 
     @Serializable

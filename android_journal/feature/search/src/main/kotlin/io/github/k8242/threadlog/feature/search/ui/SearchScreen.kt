@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
@@ -57,7 +59,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material.icons.outlined.Menu
 import io.github.k8242.threadlog.core.model.SearchHit
 import io.github.k8242.threadlog.core.model.Tag
 
@@ -86,6 +87,7 @@ fun SearchScreen(
         onQueryChanged = viewModel::onQueryChanged,
         onClearQuery = viewModel::clearQuery,
         onToggleIncludeHiddenAutoTags = viewModel::toggleIncludeHiddenAutoTags,
+        onToggleIncludeArchived = viewModel::toggleIncludeArchived,
         onStepPreviousTierA = viewModel::stepPreviousTierA,
         onStepNextTierA = viewModel::stepNextTierA,
         onSelectTierAIndex = viewModel::selectTierAIndex,
@@ -112,6 +114,7 @@ fun SearchScreen(
     onJumpToEntryInChat: (entryId: String, localDate: String) -> Unit,
     onOpenContextWindow: (anchorEntryId: String, highlightQuery: String?) -> Unit,
     formatDateTimeLabel: (SearchHit) -> String,
+    onToggleIncludeArchived: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -124,10 +127,12 @@ fun SearchScreen(
             SearchHeader(
                 query = uiState.query,
                 includeHiddenAutoTags = uiState.includeHiddenAutoTags,
+                includeArchived = uiState.includeArchived,
                 totalCount = if (uiState.result != null) uiState.totalCount else null,
                 onQueryChanged = onQueryChanged,
                 onClearQuery = onClearQuery,
                 onToggleIncludeHiddenAutoTags = onToggleIncludeHiddenAutoTags,
+                onToggleIncludeArchived = onToggleIncludeArchived,
                 onOpenDrawer = onOpenDrawer,
             )
 
@@ -147,7 +152,9 @@ fun SearchScreen(
                     SearchEmptyState(
                         query = uiState.query,
                         includeHiddenAutoTags = uiState.includeHiddenAutoTags,
+                        includeArchived = uiState.includeArchived,
                         onEnableHiddenAutoTags = onToggleIncludeHiddenAutoTags,
+                        onEnableIncludeArchived = onToggleIncludeArchived,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -168,14 +175,17 @@ fun SearchScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchHeader(
     query: String,
     includeHiddenAutoTags: Boolean,
+    includeArchived: Boolean,
     totalCount: Int?,
     onQueryChanged: (String) -> Unit,
     onClearQuery: () -> Unit,
     onToggleIncludeHiddenAutoTags: () -> Unit,
+    onToggleIncludeArchived: () -> Unit,
     onOpenDrawer: () -> Unit,
 ) {
     Column(
@@ -228,20 +238,39 @@ private fun SearchHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            FilterChip(
-                selected = includeHiddenAutoTags,
-                onClick = onToggleIncludeHiddenAutoTags,
-                label = { Text(text = "Include hidden auto-tags") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-            )
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FilterChip(
+                    selected = includeHiddenAutoTags,
+                    onClick = onToggleIncludeHiddenAutoTags,
+                    label = { Text(text = "Include hidden auto-tags") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+                FilterChip(
+                    selected = includeArchived,
+                    onClick = onToggleIncludeArchived,
+                    label = { Text(text = "Include archived") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Inventory2,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
 
             if (totalCount != null && query.isNotBlank()) {
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = if (totalCount == 1) "1 match" else "$totalCount matches",
                     style = MaterialTheme.typography.labelMedium,
@@ -302,11 +331,14 @@ private fun SearchIdleState(modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchEmptyState(
     query: String,
     includeHiddenAutoTags: Boolean,
+    includeArchived: Boolean,
     onEnableHiddenAutoTags: () -> Unit,
+    onEnableIncludeArchived: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -324,23 +356,46 @@ private fun SearchEmptyState(
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text = if (includeHiddenAutoTags) {
-                    "Try a shorter keyword or different tag name."
-                } else {
-                    "Hidden auto-tags are currently excluded from results."
+                text = when {
+                    !includeHiddenAutoTags && !includeArchived ->
+                        "Hidden auto-tags and archived notes are currently excluded."
+                    !includeHiddenAutoTags ->
+                        "Hidden auto-tags are currently excluded from results."
+                    !includeArchived ->
+                        "Try a shorter keyword, different tag name, or include archived notes."
+                    else ->
+                        "Try a shorter keyword or different tag name."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (!includeHiddenAutoTags) {
-                FilledTonalButton(onClick = onEnableHiddenAutoTags) {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Include hidden auto-tags")
+            if (!includeHiddenAutoTags || !includeArchived) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (!includeHiddenAutoTags) {
+                        FilledTonalButton(onClick = onEnableHiddenAutoTags) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(text = "Include hidden auto-tags")
+                        }
+                    }
+                    if (!includeArchived) {
+                        FilledTonalButton(onClick = onEnableIncludeArchived) {
+                            Icon(
+                                imageVector = Icons.Outlined.Inventory2,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(text = "Include archived")
+                        }
+                    }
                 }
             }
         }

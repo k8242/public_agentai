@@ -17,6 +17,8 @@ import androidx.room.PrimaryKey
         Index(value = ["iso_week"]),
         Index(value = ["deleted_at_ms"]),
         Index(value = ["task_status"]),
+        Index(value = ["task_priority"]),
+        Index(value = ["archived_at_ms"]),
     ],
 )
 data class EntryEntity(
@@ -47,6 +49,12 @@ data class EntryEntity(
     val taskStatus: String = "NONE",
     @ColumnInfo(name = "reactions_json", defaultValue = "[]")
     val reactionsJson: String = "[]",
+    @ColumnInfo(name = "task_priority", defaultValue = "NONE")
+    val taskPriority: String = "NONE",
+    @ColumnInfo(name = "archived_at_ms")
+    val archivedAtMs: Long? = null,
+    @ColumnInfo(name = "is_highlighted", defaultValue = "0")
+    val isHighlighted: Boolean = false,
 )
 
 @Entity(

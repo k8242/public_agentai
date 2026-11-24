@@ -70,6 +70,9 @@ object WorkbookMapper {
         "deleted",
         "task_status",
         "reactions",
+        "task_priority",
+        "is_highlighted",
+        "archived_at_iso",
     )
 
     val TAG_TREE_HEADERS: List<String> = listOf(
@@ -156,6 +159,9 @@ object WorkbookMapper {
             deleted = entry.isDeleted,
             taskStatus = entry.taskStatus.name,
             reactions = entry.reactions,
+            taskPriority = entry.taskPriority.name,
+            isHighlighted = entry.isHighlighted,
+            archivedAtIso = entry.archivedAtMs?.let { formatEpochMsWithZone(it, entry.zoneId) },
         )
     }
 
@@ -289,6 +295,9 @@ object WorkbookMapper {
             attachmentSha256s = attachmentSha256s,
             taskStatus = entry.entry.taskStatus.name,
             reactions = entry.entry.reactions,
+            taskPriority = entry.entry.taskPriority.name,
+            isHighlighted = entry.entry.isHighlighted,
+            isArchived = entry.entry.isArchived,
         )
     }
 
@@ -316,6 +325,9 @@ object WorkbookMapper {
             attachmentSha256s = attachmentSha256s,
             taskStatus = row.taskStatus,
             reactions = row.reactions,
+            taskPriority = row.taskPriority,
+            isHighlighted = row.isHighlighted,
+            isArchived = !row.archivedAtIso.isNullOrBlank(),
         )
     }
 
@@ -414,6 +426,9 @@ object WorkbookMapper {
                 row.deleted.toString(),
                 normalizeTaskStatus(row.taskStatus),
                 joinListCell(row.reactions.distinct()),
+                normalizeTaskPriority(row.taskPriority),
+                row.isHighlighted.toString(),
+                row.archivedAtIso.orEmpty(),
             )
         }
         return rows
@@ -452,6 +467,9 @@ object WorkbookMapper {
                 val deleted = parseBooleanCell(row.cell("deleted", 11))
                 val taskStatus = normalizeTaskStatus(row.cell("task_status", 12))
                 val reactions = splitListCell(row.cell("reactions", 13)).distinct()
+                val taskPriority = normalizeTaskPriority(row.cell("task_priority", 14))
+                val isHighlighted = parseBooleanCell(row.cell("is_highlighted", 15))
+                val archivedAtIso = row.cell("archived_at_iso", 16).trim().takeIf { it.isNotEmpty() }
 
                 SheetEntryRow(
                     entryId = entryId,
@@ -468,6 +486,9 @@ object WorkbookMapper {
                     deleted = deleted,
                     taskStatus = taskStatus,
                     reactions = reactions,
+                    taskPriority = taskPriority,
+                    isHighlighted = isHighlighted,
+                    archivedAtIso = archivedAtIso,
                 )
             }
     }
@@ -617,8 +638,12 @@ object WorkbookMapper {
         attachmentSha256s: Collection<String>,
         taskStatus: String = "NONE",
         reactions: Collection<String> = emptyList(),
+        taskPriority: String = "NONE",
+        isHighlighted: Boolean = false,
+        isArchived: Boolean = false,
     ): String {
         val normalizedTask = normalizeTaskStatus(taskStatus)
+        val normalizedPriority = if (normalizedTask == "NONE") "NONE" else normalizeTaskPriority(taskPriority)
         val canonical = buildString {
             append("v1\n")
             append("body=").append(bodyRaw).append('\n')
@@ -636,6 +661,15 @@ object WorkbookMapper {
             if (cleanedReactions.isNotEmpty()) {
                 append("\nreactions=").append(cleanedReactions.joinToString(","))
             }
+            if (normalizedPriority != "NONE") {
+                append("\npriority=").append(normalizedPriority)
+            }
+            if (isHighlighted) {
+                append("\nhighlighted=true")
+            }
+            if (isArchived) {
+                append("\narchived=true")
+            }
         }
         return ContentHasher.sha256Hex(canonical)
     }
@@ -644,6 +678,14 @@ object WorkbookMapper {
         when (raw.trim().uppercase(Locale.ROOT)) {
             "TODO" -> "TODO"
             "DONE" -> "DONE"
+            else -> "NONE"
+        }
+
+    private fun normalizeTaskPriority(raw: String): String =
+        when (raw.trim().uppercase(Locale.ROOT)) {
+            "HIGH" -> "HIGH"
+            "MEDIUM" -> "MEDIUM"
+            "LOW" -> "LOW"
             else -> "NONE"
         }
 

@@ -56,7 +56,7 @@ private enum class BackdateTab(val label: String) {
     ZONE("Timezone"),
 }
 
-private val COMMON_ZONES = listOf(
+internal val COMMON_ZONES = listOf(
     "America/Los_Angeles",
     "Pacific/Honolulu",
     "America/Denver",
@@ -78,9 +78,94 @@ internal fun formatBackdateChipLabel(epochMs: Long, zoneId: String?): String {
 }
 
 /**
+ * Reusable preset + searchable IANA timezone picker shared between backdating and message details.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun IanaTimezonePickerSection(
+    selectedZoneId: String,
+    onSelectZone: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val defaultZoneId = remember { ZoneId.systemDefault().id }
+    var zoneQuery by remember { mutableStateOf("") }
+    val allZoneIds = remember { ZoneId.getAvailableZoneIds().sorted() }
+    val filteredZones = remember(zoneQuery, allZoneIds) {
+        val q = zoneQuery.trim().lowercase(Locale.ROOT)
+        if (q.isEmpty()) {
+            allZoneIds.take(40)
+        } else {
+            allZoneIds.filter { it.lowercase(Locale.ROOT).contains(q) }.take(60)
+        }
+    }
+    val presets = remember(defaultZoneId) {
+        (listOf(defaultZoneId) + COMMON_ZONES).distinct()
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            presets.forEach { zone ->
+                FilterChip(
+                    selected = selectedZoneId == zone,
+                    onClick = { onSelectZone(zone) },
+                    label = {
+                        Text(
+                            text = if (zone == defaultZoneId) "Device ($zone)" else zone,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                )
+            }
+        }
+
+        OutlinedTextField(
+            value = zoneQuery,
+            onValueChange = { zoneQuery = it },
+            placeholder = { Text("Search IANA timezone (e.g. America/New_York)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Surface(
+            tonalElevation = 1.dp,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 180.dp),
+        ) {
+            LazyColumn {
+                items(filteredZones, key = { it }) { zone ->
+                    Text(
+                        text = zone,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (zone == selectedZoneId) FontWeight.Bold else FontWeight.Normal,
+                        color = if (zone == selectedZoneId) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectZone(zone) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                    HorizontalDivider(thickness = 0.5.dp)
+                }
+            }
+        }
+    }
+}
+
+/**
  * Dialog allowing the user to backdate a new note with a specific date, time, and IANA timezone.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackdateComposerDialog(
     initialTimestampMs: Long?,
@@ -94,7 +179,6 @@ fun BackdateComposerDialog(
     var selectedZoneId by remember { mutableStateOf(initialZoneId ?: defaultZoneId) }
     var keepAfterSend by remember { mutableStateOf(initialKeepAfterSend) }
     var activeTab by remember { mutableStateOf(BackdateTab.DATE) }
-    var zoneQuery by remember { mutableStateOf("") }
 
     val initialZdt = remember(initialTimestampMs, initialZoneId) {
         val zone = runCatching { (initialZoneId ?: defaultZoneId).let(ZoneId::of) }
@@ -111,16 +195,6 @@ fun BackdateComposerDialog(
         initialMinute = initialZdt.minute,
         is24Hour = false,
     )
-
-    val allZoneIds = remember { ZoneId.getAvailableZoneIds().sorted() }
-    val filteredZones = remember(zoneQuery, allZoneIds) {
-        val q = zoneQuery.trim().lowercase(Locale.ROOT)
-        if (q.isEmpty()) {
-            allZoneIds.take(40)
-        } else {
-            allZoneIds.filter { it.lowercase(Locale.ROOT).contains(q) }.take(60)
-        }
-    }
 
     val selectedDate: LocalDate = datePickerState.selectedDateMillis?.let { millis ->
         Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
@@ -185,62 +259,10 @@ fun BackdateComposerDialog(
                     }
 
                     BackdateTab.ZONE -> {
-                        val presets = remember(defaultZoneId) {
-                            (listOf(defaultZoneId) + COMMON_ZONES).distinct()
-                        }
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            presets.forEach { zone ->
-                                FilterChip(
-                                    selected = selectedZoneId == zone,
-                                    onClick = { selectedZoneId = zone },
-                                    label = {
-                                        Text(
-                                            text = if (zone == defaultZoneId) "Device ($zone)" else zone,
-                                            style = MaterialTheme.typography.labelSmall,
-                                        )
-                                    },
-                                )
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = zoneQuery,
-                            onValueChange = { zoneQuery = it },
-                            placeholder = { Text("Search IANA timezone (e.g. America/New_York)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                        IanaTimezonePickerSection(
+                            selectedZoneId = selectedZoneId,
+                            onSelectZone = { selectedZoneId = it },
                         )
-
-                        Surface(
-                            tonalElevation = 1.dp,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 180.dp),
-                        ) {
-                            LazyColumn {
-                                items(filteredZones, key = { it }) { zone ->
-                                    Text(
-                                        text = zone,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = if (zone == selectedZoneId) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (zone == selectedZoneId) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { selectedZoneId = zone }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    )
-                                    HorizontalDivider(thickness = 0.5.dp)
-                                }
-                            }
-                        }
                     }
                 }
 

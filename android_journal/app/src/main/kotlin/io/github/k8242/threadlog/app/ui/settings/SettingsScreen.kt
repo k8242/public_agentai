@@ -100,6 +100,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setShowHiddenPlaceholderMessages(show: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowHiddenPlaceholderMessages(show)
+        }
+    }
+
     fun setScheduledBackupCadence(cadence: BackupCadence) {
         viewModelScope.launch {
             settingsRepository.setScheduledBackupCadence(cadence)
@@ -249,6 +255,13 @@ fun SettingsScreen(
                 subtitle = "Surface unreviewed offline auto-tag suggestions inline beneath bubbles.",
                 checked = userSettings.showHiddenAutoTagsInChat,
                 onCheckedChange = viewModel::setShowHiddenAutoTagsInChat,
+            )
+
+            SettingsToggleRow(
+                title = "Show hidden messages in All Notes",
+                subtitle = "Show <Media omitted> and deleted-message placeholders in All Notes",
+                checked = userSettings.showHiddenPlaceholderMessages,
+                onCheckedChange = viewModel::setShowHiddenPlaceholderMessages,
             )
 
             HorizontalDivider()

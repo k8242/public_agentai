@@ -166,4 +166,36 @@ class CalendarGridBuilderTest {
             .containsExactly("S", "M", "T", "W", "T", "F", "S")
             .inOrder()
     }
+
+    @Test
+    fun `buildMonthGrid populates openTodoCount and completedTodoCount and clamps negatives`() {
+        val nov2026 = YearMonth.of(2026, 11)
+        val grid = CalendarGridBuilder.buildMonthGrid(
+            yearMonth = nov2026,
+            weekStart = WeekStart.MONDAY,
+            countsByDate = mapOf("2026-11-10" to 3, "2026-11-12" to 1),
+            today = LocalDate.of(2026, 11, 19),
+            selectedDate = "2026-11-10",
+            openTodoCountsByDate = mapOf("2026-11-10" to 2, "2026-11-12" to -1),
+            completedTodoCountsByDate = mapOf("2026-11-10" to 1, "2026-11-12" to 1),
+        )
+
+        val paddingCell = grid.first()
+        assertThat(paddingCell.dayOfMonth).isNull()
+        assertThat(paddingCell.openTodoCount).isEqualTo(0)
+        assertThat(paddingCell.completedTodoCount).isEqualTo(0)
+
+        val nov10 = grid.first { it.localDateKey == "2026-11-10" }
+        assertThat(nov10.entryCount).isEqualTo(3)
+        assertThat(nov10.openTodoCount).isEqualTo(2)
+        assertThat(nov10.completedTodoCount).isEqualTo(1)
+
+        val nov12 = grid.first { it.localDateKey == "2026-11-12" }
+        assertThat(nov12.openTodoCount).isEqualTo(0)
+        assertThat(nov12.completedTodoCount).isEqualTo(1)
+
+        val nov15 = grid.first { it.localDateKey == "2026-11-15" }
+        assertThat(nov15.openTodoCount).isEqualTo(0)
+        assertThat(nov15.completedTodoCount).isEqualTo(0)
+    }
 }

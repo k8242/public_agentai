@@ -32,7 +32,7 @@ class SearchViewModelTest {
         val recent2 = sampleSearchHit("r2", 1_794_900_000_000L, "2026-11-17", "Recent <mark>coffee</mark> #2")
         val older1 = sampleSearchHit("o1", 1_780_000_000_000L, "2026-05-29", "Older <mark>coffee</mark> #1")
 
-        val searchRepo = FakeSearchRepository { query, includeHidden ->
+        val searchRepo = FakeSearchRepository { query, includeHidden, _ ->
             HybridSearchResult(
                 query = query,
                 includeHiddenAutoTags = includeHidden,
@@ -67,7 +67,7 @@ class SearchViewModelTest {
         val recent2 = sampleSearchHit("r2", 2000L, "2026-11-17", "<mark>plan</mark> 2")
         val recent3 = sampleSearchHit("r3", 1000L, "2026-11-16", "<mark>plan</mark> 3")
 
-        val searchRepo = FakeSearchRepository { query, includeHidden ->
+        val searchRepo = FakeSearchRepository { query, includeHidden, _ ->
             HybridSearchResult(
                 query = query,
                 includeHiddenAutoTags = includeHidden,
@@ -118,7 +118,7 @@ class SearchViewModelTest {
             matchedViaHiddenAutoTag = true,
         )
 
-        val searchRepo = FakeSearchRepository { query, includeHidden ->
+        val searchRepo = FakeSearchRepository { query, includeHidden, _ ->
             HybridSearchResult(
                 query = query,
                 includeHiddenAutoTags = includeHidden,
@@ -141,15 +141,58 @@ class SearchViewModelTest {
         assertThat(viewModel.uiState.value.includeHiddenAutoTags).isFalse()
         assertThat(viewModel.uiState.value.tierACount).isEqualTo(0)
         assertThat(searchRepo.recordedCalls).containsExactly(
-            RecordedSearchCall(query = "travel", includeHiddenAutoTags = true),
-            RecordedSearchCall(query = "travel", includeHiddenAutoTags = false),
+            RecordedSearchCall(query = "travel", includeHiddenAutoTags = true, includeArchived = false),
+            RecordedSearchCall(query = "travel", includeHiddenAutoTags = false, includeArchived = false),
+        ).inOrder()
+    }
+
+    @Test
+    fun toggleIncludeArchivedRequeriesWithUpdatedFlag() = runTest {
+        val archivedHit = sampleSearchHit(
+            entryId = "e-arch",
+            createdAtMs = 5000L,
+            localDate = "2026-11-18",
+            snippetMarked = "Old <mark>receipt</mark> archived",
+        )
+
+        val searchRepo = FakeSearchRepository { query, includeHidden, includeArchived ->
+            HybridSearchResult(
+                query = query,
+                includeHiddenAutoTags = includeHidden,
+                cutoffEpochMs = 1000L,
+                tierARecent = if (includeArchived) listOf(archivedHit) else emptyList(),
+                tierBOlder = emptyList(),
+            )
+        }
+        val viewModel = SearchViewModel(searchRepo, FakeTagRepository(), disambiguator, dateCalculator)
+
+        assertThat(viewModel.uiState.value.includeArchived).isFalse()
+
+        viewModel.initQuery("receipt")
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.totalCount).isEqualTo(0)
+
+        viewModel.toggleIncludeArchived()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.includeArchived).isTrue()
+        assertThat(viewModel.uiState.value.totalCount).isEqualTo(1)
+
+        viewModel.toggleIncludeArchived()
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.includeArchived).isFalse()
+        assertThat(viewModel.uiState.value.totalCount).isEqualTo(0)
+
+        assertThat(searchRepo.recordedCalls).containsExactly(
+            RecordedSearchCall(query = "receipt", includeHiddenAutoTags = true, includeArchived = false),
+            RecordedSearchCall(query = "receipt", includeHiddenAutoTags = true, includeArchived = true),
+            RecordedSearchCall(query = "receipt", includeHiddenAutoTags = true, includeArchived = false),
         ).inOrder()
     }
 
     @Test
     fun initQueryRunsOncePerDistinctQueryAndClearQueryResetsState() = runTest {
         val hit = sampleSearchHit("e1", 5000L, "2026-11-18", "<mark>journal</mark>")
-        val searchRepo = FakeSearchRepository { query, includeHidden ->
+        val searchRepo = FakeSearchRepository { query, includeHidden, _ ->
             HybridSearchResult(
                 query = query,
                 includeHiddenAutoTags = includeHidden,
@@ -177,7 +220,7 @@ class SearchViewModelTest {
 
     @Test
     fun rapidTypingCancelsPreviousDebouncedSearch() = runTest {
-        val searchRepo = FakeSearchRepository { query, includeHidden ->
+        val searchRepo = FakeSearchRepository { query, includeHidden, _ ->
             delay(50L)
             HybridSearchResult(
                 query = query,
@@ -197,7 +240,7 @@ class SearchViewModelTest {
         advanceUntilIdle()
 
         assertThat(searchRepo.recordedCalls).containsExactly(
-            RecordedSearchCall(query = "kotlin", includeHiddenAutoTags = true),
+            RecordedSearchCall(query = "kotlin", includeHiddenAutoTags = true, includeArchived = false),
         )
     }
 

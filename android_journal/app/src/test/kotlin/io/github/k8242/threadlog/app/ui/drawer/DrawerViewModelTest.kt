@@ -166,4 +166,120 @@ class DrawerViewModelTest {
         assertThat(deletedIds).containsExactly(sampleTag.id)
         assertThat(vm.uiState.value.allTagSummaries).isEmpty()
     }
+
+    @Test
+    fun toggleShowHiddenPlaceholderMessages_persistsAndTracksArchivedCount() = runTest(testDispatcher) {
+        val overviewFlow = MutableStateFlow(
+            DrawerOverviewSummary(
+                totalEntryCount = 12,
+                openTodoCount = 3,
+                archivedCount = 4,
+            ),
+        )
+        val settingsFlow = MutableStateFlow(UserSettings(showHiddenPlaceholderMessages = false))
+        val recordedShowHiddenCalls = mutableListOf<Boolean>()
+
+        val fakeEntryRepo = object : EntryRepository {
+            override fun observePagedEntries(): Flow<PagingData<EntryWithDetails>> = flowOf(PagingData.empty())
+            override fun observeEntry(entryId: String): Flow<EntryWithDetails?> = flowOf(null)
+            override suspend fun getEntry(entryId: String): EntryWithDetails? = null
+            override suspend fun createEntry(
+                bodyRaw: String,
+                userTagIds: List<String>,
+                replyToId: String?,
+                pendingAttachments: List<PendingAttachment>,
+                nowMs: Long,
+                zoneId: String?,
+                taskStatus: TaskStatus,
+            ): EntryWithDetails = error("unused")
+
+            override suspend fun editEntry(entryId: String, newBodyRaw: String, nowMs: Long): EntryWithDetails =
+                error("unused")
+
+            override suspend fun softDeleteEntry(entryId: String, nowMs: Long) = Unit
+            override suspend fun undoSoftDelete(entryId: String) = Unit
+            override fun observeCompactSummaries(): Flow<List<CompactEntrySummary>> = flowOf(emptyList())
+            override fun observeCalendarDayCounts(
+                yearMonth: String,
+                filterTagPathPrefix: String?,
+            ): Flow<List<CalendarDayCount>> = flowOf(emptyList())
+
+            override fun observeEntriesForDate(
+                localDate: String,
+                filterTagPathPrefix: String?,
+            ): Flow<List<EntryWithDetails>> = flowOf(emptyList())
+
+            override fun observeContextWindow(startMs: Long, endMs: Long): Flow<List<EntryWithDetails>> =
+                flowOf(emptyList())
+
+            override fun observeEntriesWithPendingAutoTags(): Flow<List<EntryWithDetails>> = flowOf(emptyList())
+            override fun observeDrawerOverview(): Flow<DrawerOverviewSummary> = overviewFlow
+            override fun observeDrawerTagSummaries(): Flow<List<DrawerTagSummary>> = flowOf(emptyList())
+        }
+
+        val fakeTagRepo = object : TagRepository {
+            override fun observeAllTags(): Flow<List<Tag>> = flowOf(emptyList())
+            override suspend fun getAllTags(): List<Tag> = emptyList()
+            override suspend fun createOrGetTagByPath(fullPath: String, aliases: List<String>): Tag = error("unused")
+            override suspend fun renameOrMoveTag(tagId: String, newFullPath: String) = Unit
+            override suspend fun updateAliases(tagId: String, aliases: List<String>) = Unit
+            override suspend fun deleteTag(tagId: String) = Unit
+            override suspend fun setUserTag(entryId: String, tagId: String, attached: Boolean, nowMs: Long) = Unit
+            override suspend fun applyAutoTags(
+                entryId: String,
+                suggestions: List<Pair<String, Float>>,
+                nowMs: Long,
+            ) = Unit
+
+            override suspend fun promoteAutoTag(entryId: String, tagId: String, nowMs: Long) = Unit
+            override suspend fun rejectAutoTag(entryId: String, tagId: String, nowMs: Long) = Unit
+        }
+
+        val fakeSettingsRepo = object : SettingsRepository {
+            override val settings: Flow<UserSettings> = settingsFlow
+            override suspend fun getSettings(): UserSettings = settingsFlow.value
+            override suspend fun setWeekStart(weekStart: WeekStart) = Unit
+            override suspend fun setOfflineOnlyLinks(enabled: Boolean) = Unit
+            override suspend fun setShowHiddenAutoTagsInChat(show: Boolean) = Unit
+            override suspend fun setShowHiddenPlaceholderMessages(show: Boolean) {
+                recordedShowHiddenCalls += show
+                settingsFlow.value = settingsFlow.value.copy(showHiddenPlaceholderMessages = show)
+            }
+
+            override suspend fun setScheduledBackupCadence(cadence: BackupCadence) = Unit
+            override suspend fun updateSyncLinks(
+                spreadsheetId: String?,
+                mediaFolderId: String?,
+                lastExportIso: String?,
+            ) = Unit
+
+            override suspend fun setColorScheme(colorScheme: AppColorScheme) = Unit
+            override suspend fun setThemeMode(themeMode: ThemeMode) = Unit
+        }
+
+        val vm = DrawerViewModel(
+            entryRepository = fakeEntryRepo,
+            tagRepository = fakeTagRepo,
+            settingsRepository = fakeSettingsRepo,
+            leafDisambiguator = DefaultLeafDisambiguator(),
+        )
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.overview.archivedCount).isEqualTo(4)
+        assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isFalse()
+
+        vm.toggleShowHiddenPlaceholderMessages()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isTrue()
+        assertThat(recordedShowHiddenCalls).containsExactly(true)
+
+        vm.toggleShowHiddenPlaceholderMessages()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isFalse()
+        assertThat(recordedShowHiddenCalls).containsExactly(true, false).inOrder()
+
+        overviewFlow.value = overviewFlow.value.copy(archivedCount = 7)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.overview.archivedCount).isEqualTo(7)
+    }
 }

@@ -172,6 +172,9 @@ class EntryHydrator @Inject constructor(
         val parsedTaskStatus = runCatching {
             io.github.k8242.threadlog.core.model.TaskStatus.valueOf(entry.taskStatus)
         }.getOrDefault(io.github.k8242.threadlog.core.model.TaskStatus.NONE)
+        val parsedTaskPriority = runCatching {
+            io.github.k8242.threadlog.core.model.TaskPriority.valueOf(entry.taskPriority)
+        }.getOrDefault(io.github.k8242.threadlog.core.model.TaskPriority.NONE)
         val reactions = ReactionsJsonCodec.decode(entry.reactionsJson)
 
         val updatedHash = EntryContentHasher.compute(
@@ -185,6 +188,9 @@ class EntryHydrator @Inject constructor(
             attachmentSha256s = attachmentSha256s,
             taskStatus = parsedTaskStatus,
             reactions = reactions,
+            taskPriority = parsedTaskPriority,
+            isHighlighted = entry.isHighlighted,
+            isArchived = entry.archivedAtMs != null,
         )
 
         if (updatedHash == entry.contentHash) return entry

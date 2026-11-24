@@ -50,6 +50,7 @@ import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -86,8 +87,10 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import io.github.k8242.threadlog.core.model.Attachment
 import io.github.k8242.threadlog.core.model.Tag
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -115,6 +118,8 @@ fun ChatComposer(
     onOpenQuickTagPicker: () -> Unit,
     onSendOrSave: () -> Unit,
     modifier: Modifier = Modifier,
+    onSetComposerTaskPriority: (TaskPriority) -> Unit = {},
+    onRemoveEditingAttachment: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -229,17 +234,23 @@ fun ChatComposer(
                 }
             }
 
-            // Pending attachments strip
-            if (uiState.pendingAttachments.isNotEmpty() || uiState.isCompressingImage) {
+            // Pending & editing attachments strip
+            if (
+                uiState.editingKeptAttachments.isNotEmpty() ||
+                uiState.pendingAttachments.isNotEmpty() ||
+                uiState.isCompressingImage
+            ) {
                 PendingAttachmentStrip(
-                    attachments = uiState.pendingAttachments,
+                    keptAttachments = uiState.editingKeptAttachments,
+                    pendingAttachments = uiState.pendingAttachments,
                     isCompressing = uiState.isCompressingImage,
                     resolveAttachmentPath = resolveAttachmentPath,
-                    onRemove = onRemovePendingAttachment,
+                    onRemoveKept = onRemoveEditingAttachment,
+                    onRemovePending = onRemovePendingAttachment,
                 )
             }
 
-            // Selected tags, backdate & TODO mode strip
+            // Selected tags, backdate, priority & TODO mode strip
             if (
                 (uiState.selectedTagIds.isNotEmpty() || uiState.composerIsTask || uiState.composerCustomTimestampMs != null) &&
                 uiState.editingEntry == null
@@ -300,6 +311,48 @@ fun ChatComposer(
                                 },
                             )
                         }
+                        item(key = "composer_priority_chip") {
+                            val currentPriority = uiState.composerTaskPriority
+                            val nextPriority = when (currentPriority) {
+                                TaskPriority.NONE -> TaskPriority.HIGH
+                                TaskPriority.HIGH -> TaskPriority.MEDIUM
+                                TaskPriority.MEDIUM -> TaskPriority.LOW
+                                TaskPriority.LOW -> TaskPriority.NONE
+                            }
+                            val priorityTint = if (currentPriority == TaskPriority.NONE) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                taskPriorityColor(currentPriority)
+                            }
+                            InputChip(
+                                selected = currentPriority != TaskPriority.NONE,
+                                onClick = { onSetComposerTaskPriority(nextPriority) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Flag,
+                                        contentDescription = null,
+                                        tint = priorityTint,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = if (currentPriority == TaskPriority.NONE) {
+                                            "Priority"
+                                        } else {
+                                            taskPriorityShortLabel(currentPriority)
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (currentPriority != TaskPriority.NONE) {
+                                            FontWeight.Bold
+                                        } else {
+                                            FontWeight.Normal
+                                        },
+                                        color = priorityTint,
+                                    )
+                                },
+                            )
+                        }
                     }
                     items(uiState.selectedTagIds, key = { it }) { tagId ->
                         val tag = tagsById[tagId]
@@ -328,22 +381,22 @@ fun ChatComposer(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                if (uiState.editingEntry == null) {
-                    IconButton(
-                        onClick = {
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                            )
-                        },
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Image,
-                            contentDescription = "Attach photo",
-                            modifier = Modifier.size(20.dp),
+                IconButton(
+                    onClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
-                    }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Image,
+                        contentDescription = "Attach photo",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
 
+                if (uiState.editingEntry == null) {
                     IconButton(
                         onClick = onOpenQuickTagPicker,
                         modifier = Modifier.size(36.dp),
@@ -425,7 +478,9 @@ fun ChatComposer(
                 )
 
                 val canSend = if (uiState.editingEntry != null) {
-                    uiState.composerText.isNotBlank() || uiState.editingEntry.attachments.isNotEmpty()
+                    uiState.composerText.isNotBlank() ||
+                        uiState.editingKeptAttachments.isNotEmpty() ||
+                        uiState.pendingAttachments.isNotEmpty()
                 } else {
                     uiState.composerText.isNotBlank() || uiState.pendingAttachments.isNotEmpty()
                 }
@@ -600,10 +655,12 @@ private fun ComposerContextBar(
 
 @Composable
 private fun PendingAttachmentStrip(
-    attachments: List<PendingAttachment>,
+    keptAttachments: List<Attachment>,
+    pendingAttachments: List<PendingAttachment>,
     isCompressing: Boolean,
     resolveAttachmentPath: (String) -> String,
-    onRemove: (String) -> Unit,
+    onRemoveKept: (String) -> Unit,
+    onRemovePending: (String) -> Unit,
 ) {
     LazyRow(
         modifier = Modifier
@@ -612,31 +669,20 @@ private fun PendingAttachmentStrip(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(attachments, key = { it.localFilename }) { att ->
-            Box(modifier = Modifier.size(64.dp)) {
-                AsyncImage(
-                    model = File(resolveAttachmentPath(att.localFilename)),
-                    contentDescription = "Pending attachment",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(10.dp)),
-                )
-                IconButton(
-                    onClick = { onRemove(att.localFilename) },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(2.dp)
-                        .size(20.dp)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = "Remove attachment",
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
+        items(keptAttachments, key = { "kept_${it.id}" }) { att ->
+            AttachmentThumbnailTile(
+                filePath = resolveAttachmentPath(att.localFilename),
+                contentDescription = "Existing attachment",
+                onRemove = { onRemoveKept(att.id) },
+            )
+        }
+
+        items(pendingAttachments, key = { "pending_${it.localFilename}" }) { att ->
+            AttachmentThumbnailTile(
+                filePath = resolveAttachmentPath(att.localFilename),
+                contentDescription = "Pending attachment",
+                onRemove = { onRemovePending(att.localFilename) },
+            )
         }
 
         if (isCompressing) {
@@ -654,6 +700,38 @@ private fun PendingAttachmentStrip(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentThumbnailTile(
+    filePath: String,
+    contentDescription: String,
+    onRemove: () -> Unit,
+) {
+    Box(modifier = Modifier.size(64.dp)) {
+        AsyncImage(
+            model = File(filePath),
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(10.dp)),
+        )
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(2.dp)
+                .size(20.dp)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Close,
+                contentDescription = "Remove attachment",
+                modifier = Modifier.size(14.dp),
+            )
         }
     }
 }

@@ -21,6 +21,8 @@ data class CalendarDayCell(
     val entryCount: Int,
     val isToday: Boolean,
     val isSelected: Boolean,
+    val openTodoCount: Int = 0,
+    val completedTodoCount: Int = 0,
 )
 
 /**
@@ -35,6 +37,8 @@ object CalendarGridBuilder {
         entryCount = 0,
         isToday = false,
         isSelected = false,
+        openTodoCount = 0,
+        completedTodoCount = 0,
     )
 
     /**
@@ -48,6 +52,8 @@ object CalendarGridBuilder {
         countsByDate: Map<String, Int>,
         today: LocalDate,
         selectedDate: String?,
+        openTodoCountsByDate: Map<String, Int> = emptyMap(),
+        completedTodoCountsByDate: Map<String, Int> = emptyMap(),
     ): List<CalendarDayCell> {
         val firstOfMonth = yearMonth.atDay(1)
         val daysInMonth = yearMonth.lengthOfMonth()
@@ -71,6 +77,8 @@ object CalendarGridBuilder {
             val date = yearMonth.atDay(day)
             val key = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
             val count = (countsByDate[key] ?: 0).coerceAtLeast(0)
+            val openTodos = (openTodoCountsByDate[key] ?: 0).coerceAtLeast(0)
+            val completedTodos = (completedTodoCountsByDate[key] ?: 0).coerceAtLeast(0)
             cells.add(
                 CalendarDayCell(
                     date = date,
@@ -79,6 +87,8 @@ object CalendarGridBuilder {
                     entryCount = count,
                     isToday = date == today,
                     isSelected = key == selectedDate,
+                    openTodoCount = openTodos,
+                    completedTodoCount = completedTodos,
                 ),
             )
         }
@@ -120,12 +130,16 @@ fun buildMonthGrid(
     countsByDate: Map<String, Int>,
     today: LocalDate,
     selectedDate: String?,
+    openTodoCountsByDate: Map<String, Int> = emptyMap(),
+    completedTodoCountsByDate: Map<String, Int> = emptyMap(),
 ): List<CalendarDayCell> = CalendarGridBuilder.buildMonthGrid(
     yearMonth = yearMonth,
     weekStart = weekStart,
     countsByDate = countsByDate,
     today = today,
     selectedDate = selectedDate,
+    openTodoCountsByDate = openTodoCountsByDate,
+    completedTodoCountsByDate = completedTodoCountsByDate,
 )
 
 /** Convenience top-level wrapper for [CalendarGridBuilder.densityDotsCount]. */

@@ -15,6 +15,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +58,7 @@ fun ThreadLogApp(
     val scope = rememberCoroutineScope()
 
     var activeChatFilter by remember { mutableStateOf<ChatFeedFilter>(ChatFeedFilter.All) }
+    var jumpNonce by remember { mutableLongStateOf(0L) }
 
     val isOnChatScreen = currentDestination == null || currentDestination.hasRoute<ThreadLogRoute.Chat>()
 
@@ -112,11 +114,13 @@ fun ThreadLogApp(
     }
 
     fun jumpToChat(entryId: String?, localDate: String?) {
+        jumpNonce += 1L
         activeChatFilter = ChatFeedFilter.All
         navController.navigate(
             ThreadLogRoute.Chat(
                 jumpToEntryId = entryId,
                 jumpToLocalDate = localDate,
+                jumpNonce = jumpNonce,
             ),
         ) {
             popUpTo(navController.graph.findStartDestination().id) {
@@ -152,6 +156,7 @@ fun ThreadLogApp(
                 onSearchQueryChanged = drawerViewModel::onSearchQueryChanged,
                 onSelectCategory = drawerViewModel::onSelectCategory,
                 onToggleShowHiddenAutoTags = drawerViewModel::toggleShowHiddenAutoTags,
+                onToggleShowHiddenPlaceholderMessages = drawerViewModel::toggleShowHiddenPlaceholderMessages,
                 onOpenAutoTagReview = {
                     closeDrawer()
                     navController.navigate(ThreadLogRoute.AutoTagReview)
@@ -192,6 +197,7 @@ fun ThreadLogApp(
                     onOpenDrawer = ::openDrawer,
                     jumpToEntryId = args.jumpToEntryId,
                     jumpToLocalDate = args.jumpToLocalDate,
+                    jumpNonce = args.jumpNonce,
                     onOpenAutoTagReview = { navController.navigate(ThreadLogRoute.AutoTagReview) },
                     onOpenSettings = { navController.navigate(ThreadLogRoute.Settings) },
                     onOpenSearch = { query -> navController.navigate(ThreadLogRoute.Search(query)) },

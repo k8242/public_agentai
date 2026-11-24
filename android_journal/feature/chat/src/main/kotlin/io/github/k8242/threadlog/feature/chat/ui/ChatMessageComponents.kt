@@ -3,6 +3,8 @@
 
 package io.github.k8242.threadlog.feature.chat.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AddReaction
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
@@ -49,9 +52,12 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Highlight
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +82,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -84,6 +94,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,11 +106,106 @@ import io.github.k8242.threadlog.core.model.Bookmark
 import io.github.k8242.threadlog.core.model.EntryTag
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.ReplyPreview
+import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.parser.DateDividerMeta
 import io.github.k8242.threadlog.core.model.parser.ParsedMessage
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private val PRIORITY_HIGH_LIGHT = Color(0xFFEF6C00)
+private val PRIORITY_HIGH_DARK = Color(0xFFFFA726)
+private val PRIORITY_MEDIUM_LIGHT = Color(0xFF1565C0)
+private val PRIORITY_MEDIUM_DARK = Color(0xFF64B5F6)
+private val PRIORITY_LOW_LIGHT = Color(0xFF29B6F6)
+private val PRIORITY_LOW_DARK = Color(0xFF81D4FA)
+private val HIGHLIGHT_FILL_LIGHT = Color(0xFFFFF8D6)
+private val HIGHLIGHT_FILL_DARK = Color(0xFF3D3518)
+
+@Composable
+internal fun taskPriorityColor(priority: TaskPriority): Color {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return when (priority) {
+        TaskPriority.HIGH -> if (isDark) PRIORITY_HIGH_DARK else PRIORITY_HIGH_LIGHT
+        TaskPriority.MEDIUM -> if (isDark) PRIORITY_MEDIUM_DARK else PRIORITY_MEDIUM_LIGHT
+        TaskPriority.LOW -> if (isDark) PRIORITY_LOW_DARK else PRIORITY_LOW_LIGHT
+        TaskPriority.NONE -> MaterialTheme.colorScheme.outlineVariant
+    }
+}
+
+internal fun taskPriorityBorderWidth(priority: TaskPriority): Dp = when (priority) {
+    TaskPriority.HIGH -> 1.5.dp
+    TaskPriority.MEDIUM -> 1.5.dp
+    TaskPriority.LOW -> 1.25.dp
+    TaskPriority.NONE -> 0.75.dp
+}
+
+internal fun taskPriorityShortLabel(priority: TaskPriority): String = when (priority) {
+    TaskPriority.HIGH -> "HIGH"
+    TaskPriority.MEDIUM -> "MED"
+    TaskPriority.LOW -> "LOW"
+    TaskPriority.NONE -> "None"
+}
+
+/**
+ * Fixed-height placeholder bubble rendered when Paging 3 holds an unloaded placeholder slot,
+ * preventing 0px viewport collapse and scroll anchor drift.
+ */
+@Composable
+fun MessageBubblePlaceholder(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 4.dp,
+                bottomStart = 16.dp,
+                bottomEnd = 16.dp,
+            ),
+            border = BorderStroke(
+                width = 0.75.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+            ),
+            modifier = Modifier
+                .fillMaxWidth(0.80f)
+                .height(72.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.35f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(12.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.60f)
+                        .height(12.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
+                )
+            }
+        }
+    }
+}
 
 /**
  * 4-tier hierarchical date dividers (Year / Month / Week / Day) rendered above a message when
@@ -234,6 +340,12 @@ fun MessageBubbleItem(
     onImageClick: (String) -> Unit,
     onTagClick: (TagChipTarget) -> Unit,
     modifier: Modifier = Modifier,
+    isJumpHighlighted: Boolean = false,
+    onSetTaskPriority: (TaskPriority) -> Unit = {},
+    onToggleHighlight: () -> Unit = {},
+    onToggleArchive: () -> Unit = {},
+    onOpenDetails: () -> Unit = {},
+    onReplyPreviewClick: (String) -> Unit = {},
 ) {
     val density = LocalDensity.current
     val maxDragPx = remember(density) { with(density) { 64.dp.toPx() } }
@@ -248,20 +360,38 @@ fun MessageBubbleItem(
     val entry = entryWithDetails.entry
     val isTask = entry.isTask
     val isTaskDone = entry.isTaskDone
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val hexOrdinal = remember(entryWithDetails.dailyOrdinal) {
         "0x${entryWithDetails.dailyOrdinal.toString(16).uppercase(Locale.ROOT)}"
     }
 
     val bubbleContainerColor = when {
+        entry.isHighlighted -> if (isDark) HIGHLIGHT_FILL_DARK else HIGHLIGHT_FILL_LIGHT
         isTask && !isTaskDone -> MaterialTheme.colorScheme.surfaceContainerLow
         isTaskDone -> MaterialTheme.colorScheme.surfaceContainerLowest
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
-    val bubbleBorderColor = when {
-        isTask && !isTaskDone -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+
+    val priorityColor = taskPriorityColor(entry.taskPriority)
+    val baseBorderColor = when {
+        isTask && entry.taskPriority != TaskPriority.NONE -> {
+            if (isTaskDone) priorityColor.copy(alpha = 0.6f) else priorityColor
+        }
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
     }
-    val bubbleBorderWidth = if (isTask && !isTaskDone) 1.dp else 0.5.dp
+    val baseBorderWidth = if (isTask && entry.taskPriority != TaskPriority.NONE) {
+        taskPriorityBorderWidth(entry.taskPriority)
+    } else {
+        0.75.dp
+    }
+    val bubbleBorderColor by animateColorAsState(
+        targetValue = if (isJumpHighlighted) MaterialTheme.colorScheme.primary else baseBorderColor,
+        label = "bubbleBorderColor",
+    )
+    val bubbleBorderWidth by animateDpAsState(
+        targetValue = if (isJumpHighlighted) 2.5.dp else baseBorderWidth,
+        label = "bubbleBorderWidth",
+    )
 
     Box(
         modifier = modifier
@@ -311,7 +441,7 @@ fun MessageBubbleItem(
         ) {
             Surface(
                 color = bubbleContainerColor,
-                tonalElevation = if (isTaskDone) 0.dp else 1.dp,
+                tonalElevation = if (isTaskDone || entry.isHighlighted) 0.dp else 1.dp,
                 shape = RoundedCornerShape(
                     topStart = 16.dp,
                     topEnd = 4.dp,
@@ -324,6 +454,24 @@ fun MessageBubbleItem(
                 ),
                 modifier = Modifier
                     .fillMaxWidth(0.80f)
+                    .pointerInput(entry.id) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                    event.changes.forEach { it.consume() }
+                                    menuExpanded = true
+                                    while (true) {
+                                        val next = awaitPointerEvent(PointerEventPass.Initial)
+                                        next.changes.forEach { it.consume() }
+                                        if (next.type == PointerEventType.Release || !next.buttons.isSecondaryPressed) {
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     .combinedClickable(
                         onClick = {},
                         onLongClick = { menuExpanded = true },
@@ -333,7 +481,7 @@ fun MessageBubbleItem(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // Header row: Upper-left 0-based hex ordinal + timestamp (+ Edited timestamp + TODO badge) & overflow menu
+                    // Header row: Upper-left 0-based hex ordinal + timestamp (+ Edited timestamp + TODO & Priority badge) & overflow menu
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top,
@@ -399,10 +547,31 @@ fun MessageBubbleItem(
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                         )
                                     }
+                                    if (entry.taskPriority != TaskPriority.NONE) {
+                                        Surface(
+                                            color = priorityColor.copy(alpha = if (isDark) 0.24f else 0.14f),
+                                            shape = RoundedCornerShape(8.dp),
+                                        ) {
+                                            Text(
+                                                text = taskPriorityShortLabel(entry.taskPriority),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = priorityColor,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             entryWithDetails.replyPreview?.let { preview ->
-                                QuotedReplyBar(replyPreview = preview)
+                                QuotedReplyBar(
+                                    replyPreview = preview,
+                                    onClick = if (!preview.isDeleted) {
+                                        { onReplyPreviewClick(preview.entryId) }
+                                    } else {
+                                        null
+                                    },
+                                )
                             }
                         }
 
@@ -472,6 +641,60 @@ fun MessageBubbleItem(
                                     }
                                 }
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                                // Quick task priority selector row (setting non-NONE auto-promotes to TODO)
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    listOf(
+                                        TaskPriority.HIGH to "High",
+                                        TaskPriority.MEDIUM to "Med",
+                                        TaskPriority.LOW to "Low",
+                                        TaskPriority.NONE to "None",
+                                    ).forEach { (priority, label) ->
+                                        val isSelected = entry.taskPriority == priority
+                                        val chipAccent = taskPriorityColor(priority)
+                                        Surface(
+                                            color = if (isSelected) {
+                                                if (priority == TaskPriority.NONE) {
+                                                    MaterialTheme.colorScheme.surfaceContainerHighest
+                                                } else {
+                                                    chipAccent.copy(alpha = if (isDark) 0.30f else 0.18f)
+                                                }
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.25.dp else 0.75.dp,
+                                                color = if (priority == TaskPriority.NONE) {
+                                                    MaterialTheme.colorScheme.outlineVariant
+                                                } else {
+                                                    chipAccent
+                                                },
+                                            ),
+                                            modifier = Modifier.clickable {
+                                                menuExpanded = false
+                                                onSetTaskPriority(priority)
+                                            },
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (priority == TaskPriority.NONE) {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                } else {
+                                                    chipAccent
+                                                },
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
                                 DropdownMenuItem(
                                     text = { Text("React") },
                                     leadingIcon = {
@@ -508,6 +731,16 @@ fun MessageBubbleItem(
                                     )
                                 }
                                 DropdownMenuItem(
+                                    text = { Text(if (entry.isHighlighted) "Remove highlight" else "Highlight") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.Highlight, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onToggleHighlight()
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Reply") },
                                     leadingIcon = {
                                         Icon(Icons.AutoMirrored.Outlined.Reply, contentDescription = null)
@@ -535,6 +768,29 @@ fun MessageBubbleItem(
                                     onClick = {
                                         menuExpanded = false
                                         onManageTags()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Details") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.Info, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onOpenDetails()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (entry.isArchived) "Unarchive" else "Archive") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (entry.isArchived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onToggleArchive()
                                     },
                                 )
                                 DropdownMenuItem(
@@ -804,13 +1060,17 @@ data class TagChipTarget(
 )
 
 @Composable
-private fun QuotedReplyBar(replyPreview: ReplyPreview) {
+private fun QuotedReplyBar(
+    replyPreview: ReplyPreview,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(end = 8.dp),
     ) {
         Box(

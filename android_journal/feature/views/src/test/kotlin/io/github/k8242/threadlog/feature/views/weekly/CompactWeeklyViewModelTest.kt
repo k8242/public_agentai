@@ -189,4 +189,61 @@ class CompactWeeklyViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `preserves live taskStatus, taskPriority, and isHighlighted on compact summaries`() = runTest {
+        val entryRepo = FakeEntryRepository()
+        val todoSummary = ViewsTestData.compactSummary(
+            id = "e-task",
+            localDate = "2026-11-19",
+            hour = 10,
+            preview140 = "Ship release",
+            taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+            isHighlighted = true,
+        )
+        val details = ViewsTestData.entryDetails(
+            id = "e-task",
+            localDate = "2026-11-19",
+            hour = 10,
+            bodyPlain = "Ship release",
+            taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+            isHighlighted = true,
+        )
+        entryRepo.compactSummariesFlow.value = listOf(todoSummary)
+        entryRepo.setEntries(listOf(details))
+
+        val viewModel = createViewModel(entryRepo = entryRepo)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            val initial = expectMostRecentItem()
+            val row = initial.weeks.single().days.single().items.single()
+            assertThat(row.summary.taskStatus).isEqualTo(io.github.k8242.threadlog.core.model.TaskStatus.TODO)
+            assertThat(row.summary.taskPriority).isEqualTo(io.github.k8242.threadlog.core.model.TaskPriority.HIGH)
+            assertThat(row.summary.isHighlighted).isTrue()
+
+            // Expand row (caches details) then update summary live to DONE + LOW + unhighlighted
+            viewModel.toggleExpand("e-task")
+            advanceUntilIdle()
+            entryRepo.compactSummariesFlow.value = listOf(
+                todoSummary.copy(
+                    taskStatus = io.github.k8242.threadlog.core.model.TaskStatus.DONE,
+                    taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.LOW,
+                    isHighlighted = false,
+                ),
+            )
+            advanceUntilIdle()
+
+            val updated = expectMostRecentItem()
+            val updatedRow = updated.weeks.single().days.single().items.single()
+            assertThat(updatedRow.isExpanded).isTrue()
+            assertThat(updatedRow.summary.isTaskDone).isTrue()
+            assertThat(updatedRow.summary.taskPriority).isEqualTo(io.github.k8242.threadlog.core.model.TaskPriority.LOW)
+            assertThat(updatedRow.summary.isHighlighted).isFalse()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 }
