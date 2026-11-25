@@ -7,7 +7,7 @@ ThreadLog's source code is licensed under the [MIT License](LICENSE). While the 
 The following identifiers and assets are reserved by **k8242** for official ThreadLog distributions:
 
 - The name **"ThreadLog"** (and confusingly similar variations) as the title of a distributed app or service
-- The ThreadLog app icon (`app/src/main/res/drawable/ic_launcher.xml`) and official store artwork
+- The ThreadLog app icon (`app/src/main/res/mipmap-*/ic_launcher*`, `app/src/main/res/drawable/ic_launcher_*.xml`, and `app/src/main/ic_launcher-playstore.png`) and official store artwork
 - The official Android application ID (`io.github.k8242.threadlog`)
 
 ## Guidelines for Forks & Redistributed Builds

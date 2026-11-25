@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Yarn ball with carved strand grooves (clipped to ball circumference) -->
+    <group>
+        <clip-path android:pathData="M54.0,38.5 A12.4,12.4 0 1,0 54.0,63.2 A12.4,12.4 0 1,0 54.0,38.5 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M54.0,38.5 A12.4,12.4 0 1,0 54.0,63.2 A12.4,12.4 0 1,0 54.0,38.5 Z M40.5,49.1 Q54.0,56.2 67.5,48.2 L66.6,46.6 Q54.0,54.3 41.4,47.5 Z M41.4,54.3 Q54.0,60.9 66.6,53.9 L65.7,52.3 Q54.0,59.1 42.3,52.7 Z M43.5,42.5 Q49.4,45.9 52.3,51.3 L53.9,50.5 Q50.7,44.6 44.4,41.0 Z M49.4,38.6 Q53.6,44.0 55.8,49.5 L57.5,48.8 Q55.2,43.0 50.8,37.4 Z M55.9,39.7 Q59.8,44.5 62.4,48.4 L63.9,47.3 Q61.3,43.4 57.3,38.6 Z" />
+    </group>
+
+    <!-- Crossed pencil (eraser, upper shaft, lower shaft + tip) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36.90,30.47 L39.48,33.05 L36.16,36.37 L33.58,33.79 Z M40.77,34.34 L45.45,39.02 L42.13,42.34 L37.45,37.66 Z M65.87,59.44 L70.55,64.12 L72.70,69.59 L67.23,67.44 L62.55,62.76 Z" />
+
+    <!-- Crossed chisel-tip highlighter -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M35.73,63.99 L41.20,58.52 L46.37,63.69 L40.90,69.16 Z M61.63,38.09 L65.07,34.65 L70.24,39.82 L66.80,43.26 Z M66.37,33.97 L69.99,32.68 L72.21,34.90 L70.92,38.52 Z M71.04,32.13 L72.89,29.79 L74.24,32.50 L72.76,33.85 Z" />
+
+    <!-- Trailing yarn thread into chat-bubble loop -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59.66,62.20 C64.00,66.11 47.04,64.38 46.61,69.59 C46.17,73.08 50.09,73.94 52.96,73.16"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.74" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M57.05,70.16 A3.85,2.65 0 1,0 57.05,75.46 A3.85,2.65 0 1,0 57.05,70.16 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.65" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54.17,74.55 L52.09,77.34 L56.00,75.60 Z" />
+</vector>
