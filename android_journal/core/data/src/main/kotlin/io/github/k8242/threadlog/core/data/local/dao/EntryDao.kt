@@ -65,6 +65,11 @@ data class TimelineDateBucketProjection(
     val entryCount: Int,
 )
 
+data class TodoCountsProjection(
+    val openCount: Int,
+    val completedCount: Int,
+)
+
 @Dao
 interface EntryDao {
 
@@ -106,25 +111,19 @@ interface EntryDao {
         WHERE e.deleted_at_ms IS NULL
           AND e.archived_at_ms IS NULL
           AND (:includeHidden = 1 OR $NOT_HIDDEN_PLACEHOLDER_E)
+          AND (:untaggedOnly = 0 OR NOT EXISTS (
+              SELECT 1 FROM entry_tags et
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+          ))
+          AND (:hideTodos = 0 OR e.task_status = 'NONE')
         ORDER BY e.created_at_ms DESC, e.id DESC
         """,
     )
-    fun pagingSourceAll(includeHidden: Boolean = false): PagingSource<Int, EntryEntity>
-
-    @Query(
-        """
-        SELECT e.* FROM entries e
-        WHERE e.deleted_at_ms IS NULL
-          AND e.archived_at_ms IS NULL
-          AND $NOT_HIDDEN_PLACEHOLDER_E
-          AND e.task_status IN (:statuses)
-          AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
-        ORDER BY e.created_at_ms DESC, e.id DESC
-        """,
-    )
-    fun pagingSourceTodosByNewest(
-        statuses: List<String>,
-        priorityFilter: String?,
+    fun pagingSourceAll(
+        includeHidden: Boolean = false,
+        untaggedOnly: Boolean = false,
+        hideTodos: Boolean = false,
     ): PagingSource<Int, EntryEntity>
 
     @Query(
@@ -135,12 +134,54 @@ interface EntryDao {
           AND $NOT_HIDDEN_PLACEHOLDER_E
           AND e.task_status IN (:statuses)
           AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
+        ORDER BY e.created_at_ms DESC, e.id DESC
+        """,
+    )
+    fun pagingSourceTodosByNewest(
+        statuses: List<String>,
+        priorityFilter: String?,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
+    ): PagingSource<Int, EntryEntity>
+
+    @Query(
+        """
+        SELECT e.* FROM entries e
+        WHERE e.deleted_at_ms IS NULL
+          AND e.archived_at_ms IS NULL
+          AND $NOT_HIDDEN_PLACEHOLDER_E
+          AND e.task_status IN (:statuses)
+          AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
         ORDER BY $PRIORITY_RANK_E DESC, e.created_at_ms DESC, e.id DESC
         """,
     )
     fun pagingSourceTodosByPriority(
         statuses: List<String>,
         priorityFilter: String?,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
     ): PagingSource<Int, EntryEntity>
 
     @Query(
@@ -184,6 +225,17 @@ interface EntryDao {
     @Query(
         """
         SELECT EXISTS(
+            SELECT 1 FROM entry_tags et
+            WHERE et.entry_id = :entryId
+              AND et.state IN ('USER', 'AUTO_PROMOTED')
+        )
+        """,
+    )
+    suspend fun entryHasVisibleTag(entryId: String): Boolean
+
+    @Query(
+        """
+        SELECT EXISTS(
             SELECT 1
             FROM entry_tags et
             INNER JOIN tags t ON t.id = et.tag_id
@@ -208,6 +260,12 @@ interface EntryDao {
         WHERE e.deleted_at_ms IS NULL
           AND e.archived_at_ms IS NULL
           AND (:includeHidden = 1 OR $NOT_HIDDEN_PLACEHOLDER_E)
+          AND (:untaggedOnly = 0 OR NOT EXISTS (
+              SELECT 1 FROM entry_tags et
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+          ))
+          AND (:hideTodos = 0 OR e.task_status = 'NONE')
           AND (
               e.created_at_ms > :targetCreatedAtMs
               OR (e.created_at_ms = :targetCreatedAtMs AND e.id > :targetId)
@@ -218,6 +276,8 @@ interface EntryDao {
         targetCreatedAtMs: Long,
         targetId: String,
         includeHidden: Boolean,
+        untaggedOnly: Boolean = false,
+        hideTodos: Boolean = false,
     ): Int
 
     @Query(
@@ -245,6 +305,17 @@ interface EntryDao {
           AND $NOT_HIDDEN_PLACEHOLDER_E
           AND e.task_status IN (:statuses)
           AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
           AND (
               e.created_at_ms > :targetCreatedAtMs
               OR (e.created_at_ms = :targetCreatedAtMs AND e.id > :targetId)
@@ -256,6 +327,8 @@ interface EntryDao {
         priorityFilter: String?,
         targetCreatedAtMs: Long,
         targetId: String,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
     ): Int
 
     @Query(
@@ -266,6 +339,17 @@ interface EntryDao {
           AND $NOT_HIDDEN_PLACEHOLDER_E
           AND e.task_status IN (:statuses)
           AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
           AND (
               ($PRIORITY_RANK_E) > :targetPriorityRank
               OR (
@@ -284,6 +368,8 @@ interface EntryDao {
         targetPriorityRank: Int,
         targetCreatedAtMs: Long,
         targetId: String,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
     ): Int
 
     @Query(
@@ -324,6 +410,12 @@ interface EntryDao {
         WHERE e.deleted_at_ms IS NULL
           AND e.archived_at_ms IS NULL
           AND (:includeHidden = 1 OR $NOT_HIDDEN_PLACEHOLDER_E)
+          AND (:untaggedOnly = 0 OR NOT EXISTS (
+              SELECT 1 FROM entry_tags et
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+          ))
+          AND (:hideTodos = 0 OR e.task_status = 'NONE')
           AND e.local_date <= :localDate
         ORDER BY e.local_date DESC, e.created_at_ms DESC, e.id DESC
         LIMIT 1
@@ -332,6 +424,8 @@ interface EntryDao {
     suspend fun getNewestEntryForDateOnOrBeforeAll(
         localDate: String,
         includeHidden: Boolean,
+        untaggedOnly: Boolean = false,
+        hideTodos: Boolean = false,
     ): EntryEntity?
 
     @Query(
@@ -357,6 +451,17 @@ interface EntryDao {
           AND $NOT_HIDDEN_PLACEHOLDER_E
           AND e.task_status IN (:statuses)
           AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
           AND e.local_date <= :localDate
         ORDER BY e.local_date DESC, e.created_at_ms DESC, e.id DESC
         LIMIT 1
@@ -366,6 +471,8 @@ interface EntryDao {
         localDate: String,
         statuses: List<String>,
         priorityFilter: String?,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
     ): EntryEntity?
 
     @Query(
@@ -407,11 +514,21 @@ interface EntryDao {
         WHERE e.deleted_at_ms IS NULL
           AND e.archived_at_ms IS NULL
           AND (:includeHidden = 1 OR $NOT_HIDDEN_PLACEHOLDER_E)
+          AND (:untaggedOnly = 0 OR NOT EXISTS (
+              SELECT 1 FROM entry_tags et
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+          ))
+          AND (:hideTodos = 0 OR e.task_status = 'NONE')
         GROUP BY e.local_date
         ORDER BY MAX(e.created_at_ms) DESC, e.local_date DESC
         """,
     )
-    fun observeTimelineDateBucketsAll(includeHidden: Boolean): Flow<List<TimelineDateBucketProjection>>
+    fun observeTimelineDateBucketsAll(
+        includeHidden: Boolean,
+        untaggedOnly: Boolean = false,
+        hideTodos: Boolean = false,
+    ): Flow<List<TimelineDateBucketProjection>>
 
     @Query(
         """
@@ -439,6 +556,17 @@ interface EntryDao {
           AND $NOT_HIDDEN_PLACEHOLDER_E
           AND e.task_status IN (:statuses)
           AND (:priorityFilter IS NULL OR e.task_priority = :priorityFilter)
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
         GROUP BY e.local_date
         ORDER BY MAX(e.created_at_ms) DESC, e.local_date DESC
         """,
@@ -446,6 +574,8 @@ interface EntryDao {
     fun observeTimelineDateBucketsTodos(
         statuses: List<String>,
         priorityFilter: String?,
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
     ): Flow<List<TimelineDateBucketProjection>>
 
     @Query(
@@ -476,6 +606,33 @@ interface EntryDao {
         exactTagPath: String,
         subtreeLikePattern: String,
     ): Flow<List<TimelineDateBucketProjection>>
+
+    @Query(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN e.task_status = 'TODO' THEN 1 ELSE 0 END), 0) AS openCount,
+            COALESCE(SUM(CASE WHEN e.task_status = 'DONE' THEN 1 ELSE 0 END), 0) AS completedCount
+        FROM entries e
+        WHERE e.deleted_at_ms IS NULL
+          AND e.archived_at_ms IS NULL
+          AND $NOT_HIDDEN_PLACEHOLDER_E
+          AND (:exactTagPath IS NULL OR EXISTS (
+              SELECT 1
+              FROM entry_tags et
+              INNER JOIN tags t ON t.id = et.tag_id
+              WHERE et.entry_id = e.id
+                AND et.state IN ('USER', 'AUTO_PROMOTED')
+                AND (
+                    LOWER(t.full_path) = LOWER(:exactTagPath)
+                    OR LOWER(t.full_path) LIKE LOWER(:subtreeLikePattern) ESCAPE '\'
+                )
+          ))
+        """,
+    )
+    fun observeTodoCounts(
+        exactTagPath: String? = null,
+        subtreeLikePattern: String? = null,
+    ): Flow<TodoCountsProjection>
 
     // ---- Drawer, Weekly, Calendar, ContextWindow, and AutoTag queries ----
 

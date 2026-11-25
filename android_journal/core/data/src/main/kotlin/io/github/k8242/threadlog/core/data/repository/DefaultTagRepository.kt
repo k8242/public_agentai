@@ -13,9 +13,11 @@ import io.github.k8242.threadlog.core.data.mapper.AliasesJsonCodec
 import io.github.k8242.threadlog.core.data.mapper.TagPathNormalizer
 import io.github.k8242.threadlog.core.data.mapper.toDomain
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
 import io.github.k8242.threadlog.core.model.TagState
 import io.github.k8242.threadlog.core.model.contract.TagRepository
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +34,10 @@ class DefaultTagRepository @Inject constructor(
 
     override fun observeAllTags(): Flow<List<Tag>> =
         tagDao.observeAll().map { entities -> entities.map { it.toDomain() } }
+
+    override fun observeRecentTags(limit: Int): Flow<List<Tag>> =
+        tagDao.observeRecentTags(limit.coerceAtLeast(0))
+            .map { entities -> entities.map { it.toDomain() } }
 
     override suspend fun getAllTags(): List<Tag> =
         tagDao.getAll().map { it.toDomain() }
@@ -79,12 +85,17 @@ class DefaultTagRepository @Inject constructor(
             )
 
             val updatedTargetCategory = TagRootCategory.fromPath(normalizedNewPath)
+            val preservedTargetColor = if (TagColorPreset.fromToken(target.colorToken) != null) {
+                target.colorToken
+            } else {
+                updatedTargetCategory.key
+            }
             val updatedTarget = target.copy(
                 parentId = newParentId,
                 fullPath = normalizedNewPath,
                 leafName = normalizedNewPath.substringAfterLast('/'),
                 rootCategory = updatedTargetCategory.name,
-                colorToken = updatedTargetCategory.key,
+                colorToken = preservedTargetColor,
             )
 
             val updatedDescendants = descendants.map { child ->
@@ -95,11 +106,16 @@ class DefaultTagRepository @Inject constructor(
                     "Descendant tag collision at path '$childNewPath'"
                 }
                 val category = TagRootCategory.fromPath(childNewPath)
+                val preservedChildColor = if (TagColorPreset.fromToken(child.colorToken) != null) {
+                    child.colorToken
+                } else {
+                    category.key
+                }
                 child.copy(
                     fullPath = childNewPath,
                     leafName = childNewPath.substringAfterLast('/'),
                     rootCategory = category.name,
-                    colorToken = category.key,
+                    colorToken = preservedChildColor,
                 )
             }
 
@@ -126,6 +142,18 @@ class DefaultTagRepository @Inject constructor(
 
             val affectedEntryIds = tagDao.getEntryIdsForTag(tagId)
             ftsIndexManager.reindexEntries(affectedEntryIds)
+        }
+    }
+
+    override suspend fun updateTagColor(tagId: String, colorToken: String) {
+        val normalizedToken = colorToken.trim().lowercase(Locale.ROOT)
+        database.inWriteTransaction {
+            val existing = tagDao.getById(tagId) ?: return@inWriteTransaction
+            val targetToken = normalizedToken.ifEmpty {
+                TagRootCategory.fromPath(existing.fullPath).key
+            }
+            if (existing.colorToken == targetToken) return@inWriteTransaction
+            tagDao.updateColorToken(tagId = tagId, colorToken = targetToken)
         }
     }
 

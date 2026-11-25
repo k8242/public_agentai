@@ -18,6 +18,18 @@ interface TagDao {
     @Query("SELECT * FROM tags ORDER BY full_path ASC")
     fun observeAll(): Flow<List<TagEntity>>
 
+    @Query(
+        """
+        SELECT t.* FROM tags t
+        INNER JOIN entry_tags et ON et.tag_id = t.id
+        WHERE et.state IN ('USER', 'AUTO_PROMOTED')
+        GROUP BY t.id
+        ORDER BY MAX(et.updated_at_ms) DESC, t.full_path ASC
+        LIMIT :limit
+        """,
+    )
+    fun observeRecentTags(limit: Int): Flow<List<TagEntity>>
+
     @Query("SELECT * FROM tags ORDER BY full_path ASC")
     suspend fun getAll(): List<TagEntity>
 
@@ -41,6 +53,9 @@ interface TagDao {
 
     @Update
     suspend fun updateTag(tag: TagEntity)
+
+    @Query("UPDATE tags SET color_token = :colorToken WHERE id = :tagId")
+    suspend fun updateColorToken(tagId: String, colorToken: String)
 
     suspend fun upsert(tag: TagEntity) {
         if (insertTagIgnore(tag) == -1L) {

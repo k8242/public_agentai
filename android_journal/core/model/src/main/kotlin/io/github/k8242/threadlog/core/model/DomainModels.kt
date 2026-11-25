@@ -143,22 +143,42 @@ data class AutoTagSuggestion(
 
 /** Active filter controlling which notes appear in the Chat feed. */
 sealed interface ChatFeedFilter {
-    data object All : ChatFeedFilter
+    data class All(
+        val untaggedOnly: Boolean = false,
+        val hideTodos: Boolean = false,
+    ) : ChatFeedFilter
 
     data class Todos(
         val mode: TodoFilterMode = TodoFilterMode.OPEN,
         val priorityFilter: TaskPriority? = null,
         val sortOrder: TodoSortOrder = TodoSortOrder.NEWEST,
+        val tagId: String? = null,
+        val tagFullPath: String? = null,
+        val tagDisplayLabel: String? = null,
     ) : ChatFeedFilter
 
     data class TagSubtree(
         val tagId: String,
         val fullPath: String,
         val displayLabel: String,
-    ) : ChatFeedFilter
+        val selectedSubTagId: String? = null,
+        val selectedSubTagPath: String? = null,
+        val todoFilterMode: TodoFilterMode? = null,
+        val priorityFilter: TaskPriority? = null,
+        val todoSortOrder: TodoSortOrder = TodoSortOrder.NEWEST,
+    ) : ChatFeedFilter {
+        val effectiveTagId: String get() = selectedSubTagId ?: tagId
+        val effectiveFullPath: String get() = selectedSubTagPath ?: fullPath
+    }
 
     data object Archived : ChatFeedFilter
 }
+
+/** Aggregate open and completed TODO counts (globally or scoped to a tag subtree). */
+data class TodoCounts(
+    val openCount: Int = 0,
+    val completedCount: Int = 0,
+)
 
 /** High-level counts & previews displayed in the hidable left panel. */
 data class DrawerOverviewSummary(
@@ -198,5 +218,5 @@ data class UserSettings(
     val deviceId: String = "",
     val colorScheme: AppColorScheme = AppColorScheme.TEAL,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val tagSortOrder: TagSortOrder = TagSortOrder.RECENT,
 )
-

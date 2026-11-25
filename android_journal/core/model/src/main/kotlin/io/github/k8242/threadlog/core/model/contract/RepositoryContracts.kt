@@ -16,10 +16,12 @@ import io.github.k8242.threadlog.core.model.DrawerTagSummary
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.HybridSearchResult
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.TimelineDateBucket
+import io.github.k8242.threadlog.core.model.TodoCounts
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
 import kotlinx.coroutines.flow.Flow
@@ -30,7 +32,7 @@ interface EntryRepository {
     fun observePagedEntries(filter: ChatFeedFilter): Flow<PagingData<EntryWithDetails>> =
         observePagedEntries()
     fun observePagedEntries(
-        filter: ChatFeedFilter = ChatFeedFilter.All,
+        filter: ChatFeedFilter = ChatFeedFilter.All(),
         includeHiddenPlaceholders: Boolean,
     ): Flow<PagingData<EntryWithDetails>> =
         observePagedEntries(filter)
@@ -117,18 +119,19 @@ interface EntryRepository {
     suspend fun undoSoftDelete(entryId: String)
     suspend fun findEntryOffset(
         entryId: String,
-        filter: ChatFeedFilter = ChatFeedFilter.All,
+        filter: ChatFeedFilter = ChatFeedFilter.All(),
         includeHiddenPlaceholders: Boolean = false,
     ): Int? = null
     suspend fun findDateOffset(
         localDate: String,
-        filter: ChatFeedFilter = ChatFeedFilter.All,
+        filter: ChatFeedFilter = ChatFeedFilter.All(),
         includeHiddenPlaceholders: Boolean = false,
     ): Int? = null
     fun observeTimelineDateBuckets(
-        filter: ChatFeedFilter = ChatFeedFilter.All,
+        filter: ChatFeedFilter = ChatFeedFilter.All(),
         includeHiddenPlaceholders: Boolean = false,
     ): Flow<List<TimelineDateBucket>> = flowOf(emptyList())
+    fun observeTodoCounts(tagFullPath: String? = null): Flow<TodoCounts> = flowOf(TodoCounts())
     fun observeCompactSummaries(): Flow<List<CompactEntrySummary>>
     fun observeCalendarDayCounts(yearMonth: String, filterTagPathPrefix: String? = null): Flow<List<CalendarDayCount>>
     fun observeEntriesForDate(localDate: String, filterTagPathPrefix: String? = null): Flow<List<EntryWithDetails>>
@@ -140,10 +143,12 @@ interface EntryRepository {
 
 interface TagRepository {
     fun observeAllTags(): Flow<List<Tag>>
+    fun observeRecentTags(limit: Int = 6): Flow<List<Tag>> = flowOf(emptyList())
     suspend fun getAllTags(): List<Tag>
     suspend fun createOrGetTagByPath(fullPath: String, aliases: List<String> = emptyList()): Tag
     suspend fun renameOrMoveTag(tagId: String, newFullPath: String)
     suspend fun updateAliases(tagId: String, aliases: List<String>)
+    suspend fun updateTagColor(tagId: String, colorToken: String) {}
     suspend fun deleteTag(tagId: String)
     suspend fun setUserTag(entryId: String, tagId: String, attached: Boolean, nowMs: Long = System.currentTimeMillis())
     suspend fun applyAutoTags(entryId: String, suggestions: List<Pair<String, Float>>, nowMs: Long = System.currentTimeMillis())
@@ -194,4 +199,5 @@ interface SettingsRepository {
     suspend fun updateSyncLinks(spreadsheetId: String?, mediaFolderId: String?, lastExportIso: String?)
     suspend fun setColorScheme(colorScheme: AppColorScheme) {}
     suspend fun setThemeMode(themeMode: ThemeMode) {}
+    suspend fun setTagSortOrder(sortOrder: TagSortOrder) {}
 }

@@ -270,7 +270,7 @@ class TaskAndDrawerRepositoryTest {
         val m0 = graph.entryRepository.createEntry("Next day first", emptyList(), nowMs = day2Base + 1_000L, zoneId = "UTC")
         val m1 = graph.entryRepository.createEntry("Next day second", emptyList(), nowMs = day2Base + 2_000L, zoneId = "UTC")
 
-        val snapshot = graph.entryRepository.observePagedEntries(ChatFeedFilter.All).asSnapshot()
+        val snapshot = graph.entryRepository.observePagedEntries(ChatFeedFilter.All()).asSnapshot()
         val byId = snapshot.associateBy { it.entry.id }
         assertThat(byId[n0.entry.id]!!.dailyOrdinal).isEqualTo(0)
         assertThat(byId[n1.entry.id]!!.dailyOrdinal).isEqualTo(1)
@@ -447,7 +447,7 @@ class TaskAndDrawerRepositoryTest {
         assertThat(archived.entry.isArchived).isTrue()
         assertThat(archived.entry.updatedAtMs).isNull()
 
-        assertThat(graph.entryRepository.observePagedEntries(ChatFeedFilter.All).asSnapshot()).isEmpty()
+        assertThat(graph.entryRepository.observePagedEntries(ChatFeedFilter.All()).asSnapshot()).isEmpty()
         assertThat(graph.entryRepository.observePagedEntries(ChatFeedFilter.Todos(TodoFilterMode.ALL)).asSnapshot()).isEmpty()
         assertThat(
             graph.entryRepository.observePagedEntries(
@@ -472,12 +472,12 @@ class TaskAndDrawerRepositoryTest {
             nowMs = base + 3_000L,
         )
         assertThat(archivedSearch.tierARecent.map { it.entryId }).containsExactly(note.entry.id)
-        assertThat(graph.entryRepository.findEntryOffset(note.entry.id, ChatFeedFilter.All)).isNull()
+        assertThat(graph.entryRepository.findEntryOffset(note.entry.id, ChatFeedFilter.All())).isNull()
         assertThat(graph.entryRepository.findEntryOffset(note.entry.id, ChatFeedFilter.Archived)).isEqualTo(0)
 
         // Unarchiving restores it everywhere.
         graph.entryRepository.setArchived(note.entry.id, false, nowMs = base + 4_000L)
-        assertThat(graph.entryRepository.observePagedEntries(ChatFeedFilter.All).asSnapshot().map { it.entry.id })
+        assertThat(graph.entryRepository.observePagedEntries(ChatFeedFilter.All()).asSnapshot().map { it.entry.id })
             .containsExactly(note.entry.id)
         assertThat(graph.entryRepository.observeDrawerOverview().first().archivedCount).isEqualTo(0)
     }
@@ -505,24 +505,24 @@ class TaskAndDrawerRepositoryTest {
         )
 
         // Hidden by default in All, CompactSummaries, Search, and DrawerOverview.
-        val defaultAll = graph.entryRepository.observePagedEntries(ChatFeedFilter.All, includeHiddenPlaceholders = false)
+        val defaultAll = graph.entryRepository.observePagedEntries(ChatFeedFilter.All(), includeHiddenPlaceholders = false)
             .asSnapshot()
         assertThat(defaultAll.map { it.entry.id }).containsExactly(normal.entry.id)
         assertThat(graph.entryRepository.observeCompactSummaries().first().map { it.id })
             .containsExactly(normal.entry.id)
         assertThat(graph.searchRepository.search("omitted", nowMs = base + 4_000L).tierARecent).isEmpty()
         assertThat(graph.entryRepository.observeDrawerOverview().first().totalEntryCount).isEqualTo(1)
-        assertThat(graph.entryRepository.findEntryOffset(omitted.entry.id, ChatFeedFilter.All, false)).isNull()
+        assertThat(graph.entryRepository.findEntryOffset(omitted.entry.id, ChatFeedFilter.All(), false)).isNull()
 
         // Visible when includeHiddenPlaceholders = true in All Notes.
-        val withHidden = graph.entryRepository.observePagedEntries(ChatFeedFilter.All, includeHiddenPlaceholders = true)
+        val withHidden = graph.entryRepository.observePagedEntries(ChatFeedFilter.All(), includeHiddenPlaceholders = true)
             .asSnapshot()
         assertThat(withHidden.map { it.entry.id }).containsExactly(
             deletedPlaceholder.entry.id,
             omitted.entry.id,
             normal.entry.id,
         ).inOrder()
-        assertThat(graph.entryRepository.findEntryOffset(omitted.entry.id, ChatFeedFilter.All, true)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(omitted.entry.id, ChatFeedFilter.All(), true)).isEqualTo(1)
 
         // Attaching a real photo to <Media omitted> via editEntry makes it visible everywhere!
         val att1 = io.github.k8242.threadlog.core.model.contract.PendingAttachment(
@@ -540,7 +540,7 @@ class TaskAndDrawerRepositoryTest {
             addedAttachments = listOf(att1),
         )
         assertThat(editedWithPhoto.attachments).hasSize(1)
-        val afterAttachAll = graph.entryRepository.observePagedEntries(ChatFeedFilter.All, includeHiddenPlaceholders = false)
+        val afterAttachAll = graph.entryRepository.observePagedEntries(ChatFeedFilter.All(), includeHiddenPlaceholders = false)
             .asSnapshot()
         assertThat(afterAttachAll.map { it.entry.id }).containsExactly(omitted.entry.id, normal.entry.id).inOrder()
         assertThat(graph.searchRepository.search("omitted", nowMs = base + 6_000L).tierARecent.map { it.entryId })
@@ -576,16 +576,16 @@ class TaskAndDrawerRepositoryTest {
         val e2 = graph.entryRepository.createEntry("Day 2 morning", emptyList(), nowMs = day2a, zoneId = "UTC")
         val e3 = graph.entryRepository.createEntry("Day 2 evening", emptyList(), nowMs = day2b, zoneId = "UTC")
 
-        val buckets = graph.entryRepository.observeTimelineDateBuckets(ChatFeedFilter.All).first()
+        val buckets = graph.entryRepository.observeTimelineDateBuckets(ChatFeedFilter.All()).first()
         assertThat(buckets).containsExactly(
             io.github.k8242.threadlog.core.model.TimelineDateBucket("2026-11-20", 2),
             io.github.k8242.threadlog.core.model.TimelineDateBucket("2026-11-18", 1),
         ).inOrder()
 
-        assertThat(graph.entryRepository.findDateOffset("2026-11-20", ChatFeedFilter.All)).isEqualTo(0)
-        assertThat(graph.entryRepository.findDateOffset("2026-11-19", ChatFeedFilter.All)).isEqualTo(2)
-        assertThat(graph.entryRepository.findDateOffset("2026-11-18", ChatFeedFilter.All)).isEqualTo(2)
-        assertThat(graph.entryRepository.findDateOffset("2026-11-10", ChatFeedFilter.All)).isNull()
+        assertThat(graph.entryRepository.findDateOffset("2026-11-20", ChatFeedFilter.All())).isEqualTo(0)
+        assertThat(graph.entryRepository.findDateOffset("2026-11-19", ChatFeedFilter.All())).isEqualTo(2)
+        assertThat(graph.entryRepository.findDateOffset("2026-11-18", ChatFeedFilter.All())).isEqualTo(2)
+        assertThat(graph.entryRepository.findDateOffset("2026-11-10", ChatFeedFilter.All())).isNull()
 
         // Change timezone of e3 to Pacific/Kiritimati (+14:00) so 2026-11-20T18:00:00Z becomes 2026-11-21!
         // Because task status/priority did not change, updatedAtMs MUST remain null (not marked Edited).
@@ -607,7 +607,7 @@ class TaskAndDrawerRepositoryTest {
         assertThat(updated.entry.updatedAtMs).isNull()
         assertThat(updated.entry.isEdited).isFalse()
 
-        val updatedBuckets = graph.entryRepository.observeTimelineDateBuckets(ChatFeedFilter.All).first()
+        val updatedBuckets = graph.entryRepository.observeTimelineDateBuckets(ChatFeedFilter.All()).first()
         assertThat(updatedBuckets.map { it.localDate to it.entryCount }).containsExactly(
             "2026-11-21" to 1,
             "2026-11-20" to 1,
@@ -616,4 +616,280 @@ class TaskAndDrawerRepositoryTest {
         assertThat(e1.entry.id).isNotEmpty()
         assertThat(e2.entry.id).isNotEmpty()
     }
+
+    @Test
+    fun observeRecentTags_ordersByMostRecentlyAttached_includingBackdatedNotes() = runTest {
+        val alpha = graph.tagRepository.createOrGetTagByPath("topics/alpha")
+        val beta = graph.tagRepository.createOrGetTagByPath("topics/beta")
+        val gamma = graph.tagRepository.createOrGetTagByPath("topics/gamma")
+        val unused = graph.tagRepository.createOrGetTagByPath("topics/unused")
+
+        val note = graph.entryRepository.createEntry(
+            bodyRaw = "Anchor note",
+            userTagIds = emptyList(),
+            nowMs = 1_763_600_000_000L,
+            zoneId = "UTC",
+        )
+        // Attach alpha at t=1000, beta at t=2000; auto-hide unused at t=9999 (must NOT appear in recent).
+        graph.tagRepository.setUserTag(note.entry.id, alpha.id, attached = true, nowMs = 1_000L)
+        graph.tagRepository.setUserTag(note.entry.id, beta.id, attached = true, nowMs = 2_000L)
+        graph.tagRepository.applyAutoTags(
+            entryId = note.entry.id,
+            suggestions = listOf(unused.fullPath to 0.9f),
+            nowMs = 9_999L,
+        )
+
+        val beforeBackdated = graph.tagRepository.observeRecentTags(limit = 6).first()
+        assertThat(beforeBackdated.map { it.id }).containsExactly(beta.id, alpha.id).inOrder()
+
+        // Create a heavily backdated note (year 2000) tagged with gamma: wall-clock updatedAtMs makes gamma #1!
+        val backdated = graph.entryRepository.createEntry(
+            bodyRaw = "Old memory backdated",
+            userTagIds = listOf(gamma.id),
+            nowMs = 946_684_800_000L, // 2000-01-01T00:00:00Z
+            zoneId = "UTC",
+        )
+        assertThat(backdated.tags.single().updatedAtMs).isGreaterThan(1_000_000_000_000L)
+
+        val afterBackdated = graph.tagRepository.observeRecentTags(limit = 6).first()
+        assertThat(afterBackdated.map { it.id }).containsExactly(gamma.id, beta.id, alpha.id).inOrder()
+
+        val limited = graph.tagRepository.observeRecentTags(limit = 2).first()
+        assertThat(limited.map { it.id }).containsExactly(gamma.id, beta.id).inOrder()
+    }
+
+    @Test
+    fun updateTagColor_persistsAndIsPreservedAcrossRenameOrMove_whileLegacyKeysRemap() = runTest {
+        val parent = graph.tagRepository.createOrGetTagByPath("people/team")
+        val customChild = graph.tagRepository.createOrGetTagByPath("people/team/Alex")
+        val defaultChild = graph.tagRepository.createOrGetTagByPath("people/team/Sam")
+
+        graph.tagRepository.updateTagColor(parent.id, io.github.k8242.threadlog.core.model.TagColorPreset.CORAL.token)
+        graph.tagRepository.updateTagColor(customChild.id, io.github.k8242.threadlog.core.model.TagColorPreset.VIOLET.token)
+
+        val coloredTags = graph.tagRepository.getAllTags().associateBy { it.id }
+        assertThat(coloredTags.getValue(parent.id).colorToken).isEqualTo("coral")
+        assertThat(coloredTags.getValue(customChild.id).colorToken).isEqualTo("violet")
+        assertThat(coloredTags.getValue(defaultChild.id).colorToken).isEqualTo("people")
+
+        // Move subtree from people/team -> projects/squad: custom colors stay, legacy "people" remaps to "projects".
+        graph.tagRepository.renameOrMoveTag(parent.id, "projects/squad")
+
+        val movedTags = graph.tagRepository.getAllTags().associateBy { it.id }
+        assertThat(movedTags.getValue(parent.id).colorToken).isEqualTo("coral")
+        assertThat(movedTags.getValue(customChild.id).colorToken).isEqualTo("violet")
+        assertThat(movedTags.getValue(defaultChild.id).colorToken).isEqualTo("projects")
+
+        // Resetting back to "default" remaps to the new category on a subsequent move.
+        graph.tagRepository.updateTagColor(parent.id, io.github.k8242.threadlog.core.model.TagColorPreset.DEFAULT.token)
+        assertThat(graph.tagRepository.getAllTags().first { it.id == parent.id }.colorToken).isEqualTo("default")
+        graph.tagRepository.renameOrMoveTag(parent.id, "topics/squad")
+        assertThat(graph.tagRepository.getAllTags().first { it.id == parent.id }.colorToken).isEqualTo("topics")
+    }
+
+    @Test
+    fun allNotesFilters_untaggedOnlyAndHideTodos_filterFeedOffsetsAndTimeline() = runTest {
+        val tag = graph.tagRepository.createOrGetTagByPath("topics/work")
+        val day1 = java.time.Instant.parse("2026-11-18T10:00:00Z").toEpochMilli()
+        val day2 = java.time.Instant.parse("2026-11-19T10:00:00Z").toEpochMilli()
+
+        val untaggedNote = graph.entryRepository.createEntry(
+            bodyRaw = "Untagged regular note",
+            userTagIds = emptyList(),
+            nowMs = day1,
+            zoneId = "UTC",
+        )
+        // Attach only an AUTO_HIDDEN tag to verify it still counts as untagged!
+        graph.tagRepository.applyAutoTags(
+            entryId = untaggedNote.entry.id,
+            suggestions = listOf("auto/hint" to 0.8f),
+            nowMs = day1 + 10L,
+        )
+        val untaggedTodo = graph.entryRepository.createEntry(
+            bodyRaw = "Untagged open task",
+            userTagIds = emptyList(),
+            nowMs = day1 + 1_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.TODO,
+        )
+        val taggedNote = graph.entryRepository.createEntry(
+            bodyRaw = "Tagged regular note",
+            userTagIds = listOf(tag.id),
+            nowMs = day2,
+            zoneId = "UTC",
+        )
+        val taggedDone = graph.entryRepository.createEntry(
+            bodyRaw = "Tagged done task",
+            userTagIds = listOf(tag.id),
+            nowMs = day2 + 1_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.DONE,
+        )
+
+        val untaggedFilter = ChatFeedFilter.All(untaggedOnly = true)
+        val untaggedFeed = graph.entryRepository.observePagedEntries(untaggedFilter).asSnapshot()
+        assertThat(untaggedFeed.map { it.entry.id }).containsExactly(
+            untaggedTodo.entry.id,
+            untaggedNote.entry.id,
+        ).inOrder()
+        assertThat(graph.entryRepository.findEntryOffset(untaggedTodo.entry.id, untaggedFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(untaggedNote.entry.id, untaggedFilter)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(taggedNote.entry.id, untaggedFilter)).isNull()
+        assertThat(graph.entryRepository.observeTimelineDateBuckets(untaggedFilter).first().map { it.localDate })
+            .containsExactly("2026-11-18")
+
+        val hideTodosFilter = ChatFeedFilter.All(hideTodos = true)
+        val hideTodosFeed = graph.entryRepository.observePagedEntries(hideTodosFilter).asSnapshot()
+        assertThat(hideTodosFeed.map { it.entry.id }).containsExactly(
+            taggedNote.entry.id,
+            untaggedNote.entry.id,
+        ).inOrder()
+        assertThat(graph.entryRepository.findEntryOffset(taggedNote.entry.id, hideTodosFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(untaggedNote.entry.id, hideTodosFilter)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(untaggedTodo.entry.id, hideTodosFilter)).isNull()
+        assertThat(graph.entryRepository.findEntryOffset(taggedDone.entry.id, hideTodosFilter)).isNull()
+
+        val bothFilter = ChatFeedFilter.All(untaggedOnly = true, hideTodos = true)
+        val bothFeed = graph.entryRepository.observePagedEntries(bothFilter).asSnapshot()
+        assertThat(bothFeed.map { it.entry.id }).containsExactly(untaggedNote.entry.id)
+        assertThat(graph.entryRepository.findEntryOffset(untaggedNote.entry.id, bothFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(untaggedTodo.entry.id, bothFilter)).isNull()
+        assertThat(graph.entryRepository.findDateOffset("2026-11-19", bothFilter)).isEqualTo(0)
+    }
+
+    @Test
+    fun bidirectionalTodoTagCrossFilter_subTagTabs_andObserveTodoCounts_workWithOffsets() = runTest {
+        val project = graph.tagRepository.createOrGetTagByPath("projects/threadlog")
+        val bugs = graph.tagRepository.createOrGetTagByPath("projects/threadlog/bugs")
+        val ui = graph.tagRepository.createOrGetTagByPath("projects/threadlog/ui")
+        val other = graph.tagRepository.createOrGetTagByPath("topics/other")
+
+        val base = java.time.Instant.parse("2026-11-20T09:00:00Z").toEpochMilli()
+        val bugHighTodo = graph.entryRepository.createEntry(
+            bodyRaw = "Crash on launch",
+            userTagIds = listOf(bugs.id),
+            nowMs = base + 1_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+        )
+        val bugDone = graph.entryRepository.createEntry(
+            bodyRaw = "Fixed typo",
+            userTagIds = listOf(bugs.id),
+            nowMs = base + 2_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.DONE,
+        )
+        val uiLowTodo = graph.entryRepository.createEntry(
+            bodyRaw = "Polish chip spacing",
+            userTagIds = listOf(ui.id),
+            nowMs = base + 3_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.LOW,
+        )
+        val uiPlainNote = graph.entryRepository.createEntry(
+            bodyRaw = "Design brainstorming",
+            userTagIds = listOf(ui.id),
+            nowMs = base + 4_000L,
+            zoneId = "UTC",
+        )
+        val otherHighTodo = graph.entryRepository.createEntry(
+            bodyRaw = "Unrelated high todo",
+            userTagIds = listOf(other.id),
+            nowMs = base + 5_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.TODO,
+            taskPriority = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+        )
+        val archivedBugTodo = graph.entryRepository.createEntry(
+            bodyRaw = "Archived bug todo",
+            userTagIds = listOf(bugs.id),
+            nowMs = base + 6_000L,
+            zoneId = "UTC",
+            taskStatus = TaskStatus.TODO,
+        )
+        graph.entryRepository.setArchived(archivedBugTodo.entry.id, true, nowMs = base + 7_000L)
+
+        // 1. observeTodoCounts globally, for parent subtree, and for child sub-tags.
+        assertThat(graph.entryRepository.observeTodoCounts().first())
+            .isEqualTo(io.github.k8242.threadlog.core.model.TodoCounts(openCount = 3, completedCount = 1))
+        assertThat(graph.entryRepository.observeTodoCounts(project.fullPath).first())
+            .isEqualTo(io.github.k8242.threadlog.core.model.TodoCounts(openCount = 2, completedCount = 1))
+        assertThat(graph.entryRepository.observeTodoCounts(bugs.fullPath).first())
+            .isEqualTo(io.github.k8242.threadlog.core.model.TodoCounts(openCount = 1, completedCount = 1))
+        assertThat(graph.entryRepository.observeTodoCounts(ui.fullPath).first())
+            .isEqualTo(io.github.k8242.threadlog.core.model.TodoCounts(openCount = 1, completedCount = 0))
+
+        // 2. Todos view filtered by parent tag subtree + sorted by priority.
+        val todosInProjectByPriority = ChatFeedFilter.Todos(
+            mode = TodoFilterMode.OPEN,
+            sortOrder = io.github.k8242.threadlog.core.model.TodoSortOrder.PRIORITY,
+            tagId = project.id,
+            tagFullPath = project.fullPath,
+            tagDisplayLabel = "threadlog",
+        )
+        val projectTodosFeed = graph.entryRepository.observePagedEntries(todosInProjectByPriority).asSnapshot()
+        assertThat(projectTodosFeed.map { it.entry.id }).containsExactly(
+            bugHighTodo.entry.id,
+            uiLowTodo.entry.id,
+        ).inOrder()
+        assertThat(graph.entryRepository.findEntryOffset(bugHighTodo.entry.id, todosInProjectByPriority)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(uiLowTodo.entry.id, todosInProjectByPriority)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(otherHighTodo.entry.id, todosInProjectByPriority)).isNull()
+        assertThat(graph.entryRepository.findEntryOffset(uiPlainNote.entry.id, todosInProjectByPriority)).isNull()
+
+        // 3. TagSubtree with active sub-tag tab (ui) without TODO filter -> all notes under ui.
+        val uiSubTabFilter = ChatFeedFilter.TagSubtree(
+            tagId = project.id,
+            fullPath = project.fullPath,
+            displayLabel = "threadlog",
+            selectedSubTagId = ui.id,
+            selectedSubTagPath = ui.fullPath,
+        )
+        val uiSubTabFeed = graph.entryRepository.observePagedEntries(uiSubTabFilter).asSnapshot()
+        assertThat(uiSubTabFeed.map { it.entry.id }).containsExactly(
+            uiPlainNote.entry.id,
+            uiLowTodo.entry.id,
+        ).inOrder()
+        assertThat(graph.entryRepository.findEntryOffset(uiPlainNote.entry.id, uiSubTabFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(uiLowTodo.entry.id, uiSubTabFilter)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(bugHighTodo.entry.id, uiSubTabFilter)).isNull()
+
+        // 4. TagSubtree with sub-tag tab (bugs) + TODO filter (ALL) + priority sort.
+        val bugsTodosFilter = ChatFeedFilter.TagSubtree(
+            tagId = project.id,
+            fullPath = project.fullPath,
+            displayLabel = "threadlog",
+            selectedSubTagId = bugs.id,
+            selectedSubTagPath = bugs.fullPath,
+            todoFilterMode = TodoFilterMode.ALL,
+            todoSortOrder = io.github.k8242.threadlog.core.model.TodoSortOrder.PRIORITY,
+        )
+        val bugsTodosFeed = graph.entryRepository.observePagedEntries(bugsTodosFilter).asSnapshot()
+        assertThat(bugsTodosFeed.map { it.entry.id }).containsExactly(
+            bugHighTodo.entry.id,
+            bugDone.entry.id,
+        ).inOrder()
+        assertThat(graph.entryRepository.findEntryOffset(bugHighTodo.entry.id, bugsTodosFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(bugDone.entry.id, bugsTodosFilter)).isEqualTo(1)
+        assertThat(graph.entryRepository.findEntryOffset(uiLowTodo.entry.id, bugsTodosFilter)).isNull()
+        assertThat(graph.entryRepository.findDateOffset("2026-11-20", bugsTodosFilter)).isEqualTo(1)
+        assertThat(graph.entryRepository.observeTimelineDateBuckets(bugsTodosFilter).first().single().entryCount)
+            .isEqualTo(2)
+
+        // 5. TagSubtree with TODO filter + HIGH priority filter.
+        val projectHighTodoFilter = ChatFeedFilter.TagSubtree(
+            tagId = project.id,
+            fullPath = project.fullPath,
+            displayLabel = "threadlog",
+            todoFilterMode = TodoFilterMode.OPEN,
+            priorityFilter = io.github.k8242.threadlog.core.model.TaskPriority.HIGH,
+        )
+        val projectHighFeed = graph.entryRepository.observePagedEntries(projectHighTodoFilter).asSnapshot()
+        assertThat(projectHighFeed.map { it.entry.id }).containsExactly(bugHighTodo.entry.id)
+        assertThat(graph.entryRepository.findEntryOffset(bugHighTodo.entry.id, projectHighTodoFilter)).isEqualTo(0)
+        assertThat(graph.entryRepository.findEntryOffset(uiLowTodo.entry.id, projectHighTodoFilter)).isNull()
+    }
 }
+

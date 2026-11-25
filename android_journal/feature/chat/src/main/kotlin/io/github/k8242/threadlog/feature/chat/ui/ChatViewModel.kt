@@ -13,7 +13,9 @@ import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.Entry
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.model.TodoFilterMode
@@ -49,6 +51,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -61,7 +64,7 @@ data class PendingJumpRequest(
 )
 
 data class ChatUiState(
-    val activeFilter: ChatFeedFilter = ChatFeedFilter.All,
+    val activeFilter: ChatFeedFilter = ChatFeedFilter.All(),
     val openTodoCount: Int = 0,
     val completedTodoCount: Int = 0,
     val composerText: String = "",
@@ -81,21 +84,28 @@ data class ChatUiState(
     val replyTarget: EntryWithDetails? = null,
     val editingEntry: EntryWithDetails? = null,
     val allTags: List<Tag> = emptyList(),
+    val recentTags: List<Tag> = emptyList(),
     val tagDisplayLabels: Map<String, String> = emptyMap(),
+    val tagSortOrder: TagSortOrder = TagSortOrder.RECENT,
     val weekStart: WeekStart = WeekStart.MONDAY,
     val showHiddenAutoTags: Boolean = false,
     val showHiddenPlaceholderMessages: Boolean = false,
     val offlineOnlyLinks: Boolean = false,
     val pendingAutoTagCount: Int = 0,
-    val undoDeletedEntryId: String? = null,
-    val undoArchivedEntryId: String? = null,
+    val selectedEntryIds: Set<String> = emptySet(),
+    val undoDeletedEntryIds: List<String> = emptyList(),
+    val undoArchivedEntryIds: List<String> = emptyList(),
     val scrollToNewestEntryId: String? = null,
     val pendingJump: PendingJumpRequest? = null,
     val highlightedEntryId: String? = null,
     val timelineIndex: ChatTimelineIndex = ChatTimelineIndex.EMPTY,
     val credentialWarning: String? = null,
     val errorMessage: String? = null,
-)
+) {
+    val isSelectionMode: Boolean get() = selectedEntryIds.isNotEmpty()
+    val undoDeletedEntryId: String? get() = undoDeletedEntryIds.singleOrNull()
+    val undoArchivedEntryId: String? get() = undoArchivedEntryIds.singleOrNull()
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -113,11 +123,11 @@ class ChatViewModel @Inject constructor(
     private val bookmarkTitleScheduler: BookmarkTitleScheduler,
 ) : ViewModel() {
 
-    private val activeFilterFlow = MutableStateFlow<ChatFeedFilter>(ChatFeedFilter.All)
+    private val activeFilterFlow = MutableStateFlow<ChatFeedFilter>(ChatFeedFilter.All())
     private val showHiddenPlaceholdersFlow = MutableStateFlow(false)
 
     private val feedQueryFlow = combine(activeFilterFlow, showHiddenPlaceholdersFlow) { filter, showHidden ->
-        filter to (filter == ChatFeedFilter.All && showHidden)
+        filter to (filter is ChatFeedFilter.All && showHidden)
     }.distinctUntilChanged()
 
     val pagedEntries: Flow<PagingData<EntryWithDetails>> =
@@ -140,9 +150,10 @@ class ChatViewModel @Inject constructor(
 
     init {
         observeTags()
+        observeRecentTags()
         observeSettings()
         observePendingAutoTags()
-        observeDrawerOverview()
+        observeTodoCounts()
         observeTimelineDateBuckets()
     }
 
@@ -161,6 +172,16 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private fun observeRecentTags() {
+        viewModelScope.launch {
+            tagRepository.observeRecentTags(limit = RECENT_TAGS_LIMIT).collect { recent ->
+                _uiState.update { state ->
+                    state.copy(recentTags = recent)
+                }
+            }
+        }
+    }
+
     private fun observeSettings() {
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
@@ -171,6 +192,7 @@ class ChatViewModel @Inject constructor(
                         showHiddenAutoTags = settings.showHiddenAutoTagsInChat,
                         showHiddenPlaceholderMessages = settings.showHiddenPlaceholderMessages,
                         offlineOnlyLinks = settings.offlineOnlyLinks,
+                        tagSortOrder = settings.tagSortOrder,
                     )
                 }
             }
@@ -187,16 +209,28 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun observeDrawerOverview() {
+    private fun observeTodoCounts() {
         viewModelScope.launch {
-            entryRepository.observeDrawerOverview().collect { overview ->
-                _uiState.update { state ->
-                    state.copy(
-                        openTodoCount = overview.openTodoCount,
-                        completedTodoCount = overview.completedTodoCount,
-                    )
+            activeFilterFlow
+                .map { filter ->
+                    when (filter) {
+                        is ChatFeedFilter.Todos -> filter.tagFullPath
+                        is ChatFeedFilter.TagSubtree -> filter.effectiveFullPath
+                        is ChatFeedFilter.All, ChatFeedFilter.Archived -> null
+                    }
                 }
-            }
+                .distinctUntilChanged()
+                .flatMapLatest { tagFullPath ->
+                    entryRepository.observeTodoCounts(tagFullPath)
+                }
+                .collect { counts ->
+                    _uiState.update { state ->
+                        state.copy(
+                            openTodoCount = counts.openCount,
+                            completedTodoCount = counts.completedCount,
+                        )
+                    }
+                }
         }
     }
 
@@ -228,38 +262,52 @@ class ChatViewModel @Inject constructor(
             }
 
             when (filter) {
-                ChatFeedFilter.All -> {
+                is ChatFeedFilter.All -> {
                     autoAttachedFilterTagId = null
                     state.copy(
                         activeFilter = filter,
                         selectedTagIds = cleanedTags,
                         composerIsTask = false,
                         composerTaskPriority = TaskPriority.NONE,
+                        selectedEntryIds = emptySet(),
                     )
                 }
 
                 is ChatFeedFilter.Todos -> {
-                    autoAttachedFilterTagId = null
-                    state.copy(
-                        activeFilter = filter,
-                        selectedTagIds = cleanedTags,
-                        composerIsTask = true,
-                    )
-                }
-
-                is ChatFeedFilter.TagSubtree -> {
-                    autoAttachedFilterTagId = filter.tagId
-                    autoAttachedReplyTagIds = autoAttachedReplyTagIds - filter.tagId
-                    val nextTags = if (filter.tagId in cleanedTags) {
-                        cleanedTags
+                    val targetTagId = filter.tagId
+                    autoAttachedFilterTagId = targetTagId
+                    if (targetTagId != null) {
+                        autoAttachedReplyTagIds = autoAttachedReplyTagIds - targetTagId
+                    }
+                    val nextTags = if (targetTagId != null && targetTagId !in cleanedTags) {
+                        cleanedTags + targetTagId
                     } else {
-                        cleanedTags + filter.tagId
+                        cleanedTags
                     }
                     state.copy(
                         activeFilter = filter,
                         selectedTagIds = nextTags,
-                        composerIsTask = false,
-                        composerTaskPriority = TaskPriority.NONE,
+                        composerIsTask = true,
+                        selectedEntryIds = emptySet(),
+                    )
+                }
+
+                is ChatFeedFilter.TagSubtree -> {
+                    val effectiveTagId = filter.effectiveTagId
+                    autoAttachedFilterTagId = effectiveTagId
+                    autoAttachedReplyTagIds = autoAttachedReplyTagIds - effectiveTagId
+                    val nextTags = if (effectiveTagId in cleanedTags) {
+                        cleanedTags
+                    } else {
+                        cleanedTags + effectiveTagId
+                    }
+                    val isTaskMode = filter.todoFilterMode != null
+                    state.copy(
+                        activeFilter = filter,
+                        selectedTagIds = nextTags,
+                        composerIsTask = isTaskMode,
+                        composerTaskPriority = if (isTaskMode) state.composerTaskPriority else TaskPriority.NONE,
+                        selectedEntryIds = emptySet(),
                     )
                 }
 
@@ -270,10 +318,21 @@ class ChatViewModel @Inject constructor(
                         selectedTagIds = cleanedTags,
                         composerIsTask = false,
                         composerTaskPriority = TaskPriority.NONE,
+                        selectedEntryIds = emptySet(),
                     )
                 }
             }
         }
+    }
+
+    fun toggleAllUntaggedOnly() {
+        val current = activeFilterFlow.value as? ChatFeedFilter.All ?: ChatFeedFilter.All()
+        setFeedFilter(current.copy(untaggedOnly = !current.untaggedOnly))
+    }
+
+    fun toggleAllHideTodos() {
+        val current = activeFilterFlow.value as? ChatFeedFilter.All ?: ChatFeedFilter.All()
+        setFeedFilter(current.copy(hideTodos = !current.hideTodos))
     }
 
     fun setTodoFilterMode(mode: TodoFilterMode) {
@@ -285,7 +344,7 @@ class ChatViewModel @Inject constructor(
             ChatFeedFilter.Todos(mode = mode)
         }
         activeFilterFlow.value = next
-        _uiState.update { it.copy(activeFilter = next, composerIsTask = true) }
+        _uiState.update { it.copy(activeFilter = next, composerIsTask = true, selectedEntryIds = emptySet()) }
     }
 
     fun setTodoPriorityFilter(priority: TaskPriority?) {
@@ -293,7 +352,7 @@ class ChatViewModel @Inject constructor(
         if (current.priorityFilter == priority) return
         val next = current.copy(priorityFilter = priority)
         activeFilterFlow.value = next
-        _uiState.update { it.copy(activeFilter = next, composerIsTask = true) }
+        _uiState.update { it.copy(activeFilter = next, composerIsTask = true, selectedEntryIds = emptySet()) }
     }
 
     fun toggleTodoSortOrder() {
@@ -304,7 +363,321 @@ class ChatViewModel @Inject constructor(
         }
         val next = current.copy(sortOrder = nextSort)
         activeFilterFlow.value = next
-        _uiState.update { it.copy(activeFilter = next, composerIsTask = true) }
+        _uiState.update { it.copy(activeFilter = next, composerIsTask = true, selectedEntryIds = emptySet()) }
+    }
+
+    fun setTodoTagFilter(tag: Tag?) {
+        val current = activeFilterFlow.value as? ChatFeedFilter.Todos ?: ChatFeedFilter.Todos()
+        val label = tag?.let { _uiState.value.tagDisplayLabels[it.id] ?: it.leafName }
+        val next = current.copy(
+            tagId = tag?.id,
+            tagFullPath = tag?.fullPath,
+            tagDisplayLabel = label,
+        )
+        setFeedFilter(next)
+    }
+
+    fun selectSubTag(subTag: Tag?) {
+        val current = activeFilterFlow.value as? ChatFeedFilter.TagSubtree ?: return
+        val next = current.copy(
+            selectedSubTagId = subTag?.id,
+            selectedSubTagPath = subTag?.fullPath,
+        )
+        setFeedFilter(next)
+    }
+
+    fun setTagTodoFilterMode(mode: TodoFilterMode?) {
+        val current = activeFilterFlow.value as? ChatFeedFilter.TagSubtree ?: return
+        if (current.todoFilterMode == mode) return
+        val next = current.copy(
+            todoFilterMode = mode,
+            priorityFilter = if (mode == null) null else current.priorityFilter,
+            todoSortOrder = if (mode == null) TodoSortOrder.NEWEST else current.todoSortOrder,
+        )
+        setFeedFilter(next)
+    }
+
+    fun setTagTodoPriorityFilter(priority: TaskPriority?) {
+        val current = activeFilterFlow.value as? ChatFeedFilter.TagSubtree ?: return
+        if (current.todoFilterMode == null || current.priorityFilter == priority) return
+        setFeedFilter(current.copy(priorityFilter = priority))
+    }
+
+    fun toggleTagTodoSortOrder() {
+        val current = activeFilterFlow.value as? ChatFeedFilter.TagSubtree ?: return
+        if (current.todoFilterMode == null) return
+        val nextSort = when (current.todoSortOrder) {
+            TodoSortOrder.NEWEST -> TodoSortOrder.PRIORITY
+            TodoSortOrder.PRIORITY -> TodoSortOrder.NEWEST
+        }
+        setFeedFilter(current.copy(todoSortOrder = nextSort))
+    }
+
+    fun updateTagColor(tagId: String, colorToken: String) {
+        viewModelScope.launch {
+            try {
+                tagRepository.updateTagColor(tagId = tagId, colorToken = colorToken)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update tag color") }
+            }
+        }
+    }
+
+    fun enterSelectionMode(entryId: String) {
+        _uiState.update { state ->
+            state.copy(selectedEntryIds = state.selectedEntryIds + entryId)
+        }
+    }
+
+    fun toggleEntrySelection(entryId: String) {
+        _uiState.update { state ->
+            val next = if (entryId in state.selectedEntryIds) {
+                state.selectedEntryIds - entryId
+            } else {
+                state.selectedEntryIds + entryId
+            }
+            state.copy(selectedEntryIds = next)
+        }
+    }
+
+    fun selectEntries(entryIds: Collection<String>) {
+        if (entryIds.isEmpty()) return
+        _uiState.update { state ->
+            state.copy(selectedEntryIds = state.selectedEntryIds + entryIds)
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedEntryIds = emptySet()) }
+    }
+
+    suspend fun buildCopiedTextForSelected(
+        loadedById: Map<String, EntryWithDetails>,
+    ): String {
+        val selectedIds = _uiState.value.selectedEntryIds
+        if (selectedIds.isEmpty()) return ""
+
+        val tagLabels = _uiState.value.tagDisplayLabels
+        val resolved = selectedIds.mapNotNull { id ->
+            loadedById[id] ?: entryRepository.getEntry(id)
+        }.sortedWith(
+            compareBy<EntryWithDetails> { it.entry.createdAtMs }.thenBy { it.entry.id },
+        )
+
+        return resolved.mapIndexed { index, item ->
+            val entry = item.entry
+            val prefixParts = buildList {
+                when (entry.taskStatus) {
+                    TaskStatus.TODO -> add("[TODO]")
+                    TaskStatus.DONE -> add("[DONE]")
+                    TaskStatus.NONE -> Unit
+                }
+                if (entry.taskPriority != TaskPriority.NONE) {
+                    add("[${taskPriorityShortLabel(entry.taskPriority)}]")
+                }
+                item.visibleTags.forEach { entryTag ->
+                    val label = tagLabels[entryTag.tagId] ?: entryTag.tag.leafName
+                    add("#$label")
+                }
+            }
+            val body = entry.bodyPlain.trim()
+                .ifBlank { entry.bodyRaw.trim() }
+                .ifBlank {
+                    val attCount = item.attachments.size
+                    if (attCount > 0) "[$attCount attachment${if (attCount == 1) "" else "s"}]" else ""
+                }
+            val prefix = prefixParts.joinToString(" ")
+            val content = when {
+                prefix.isNotEmpty() && body.isNotEmpty() -> "$prefix $body"
+                body.isNotEmpty() -> body
+                else -> prefix
+            }
+            "${index + 1}. $content"
+        }.joinToString(separator = "\n")
+    }
+
+    fun batchSetTag(tagId: String, attached: Boolean) {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    tagRepository.setUserTag(entryId = id, tagId = tagId, attached = attached)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update tags") }
+            }
+        }
+    }
+
+    fun createAndAttachBatchTag(fullPath: String) {
+        val normalized = fullPath.trim()
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (normalized.isEmpty() || ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val created = tagRepository.createOrGetTagByPath(normalized)
+                ids.forEach { id ->
+                    tagRepository.setUserTag(entryId = id, tagId = created.id, attached = true)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to attach tag") }
+            }
+        }
+    }
+
+    fun batchSetTaskStatus(status: TaskStatus) {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.setTaskStatus(entryId = id, taskStatus = status)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update task status") }
+            }
+        }
+    }
+
+    fun batchSetTaskPriority(priority: TaskPriority) {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.setTaskPriority(entryId = id, taskPriority = priority)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update task priority") }
+            }
+        }
+    }
+
+    fun batchSetHighlighted(highlighted: Boolean) {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.setHighlighted(entryId = id, highlighted = highlighted)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update highlight") }
+            }
+        }
+    }
+
+    fun batchArchive() {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        val idSet = ids.toSet()
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.setArchived(entryId = id, archived = true)
+                }
+                _uiState.update { state ->
+                    val clearingReply = state.replyTarget?.entry?.id in idSet
+                    val clearingEdit = state.editingEntry?.entry?.id in idSet
+                    val nextSelectedTags = if (clearingReply) {
+                        val cleaned = state.selectedTagIds.filterNot { it in autoAttachedReplyTagIds }
+                        autoAttachedReplyTagIds = emptySet()
+                        cleaned
+                    } else {
+                        state.selectedTagIds
+                    }
+                    state.copy(
+                        selectedEntryIds = emptySet(),
+                        undoArchivedEntryIds = ids,
+                        replyTarget = if (clearingReply) null else state.replyTarget,
+                        editingEntry = if (clearingEdit) null else state.editingEntry,
+                        editingKeptAttachments = if (clearingEdit) emptyList() else state.editingKeptAttachments,
+                        removedEditingAttachmentIds = if (clearingEdit) emptySet() else state.removedEditingAttachmentIds,
+                        pendingAttachments = if (clearingEdit) emptyList() else state.pendingAttachments,
+                        selectedTagIds = nextSelectedTags,
+                        errorMessage = null,
+                    )
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to archive entries") }
+            }
+        }
+    }
+
+    fun batchUnarchive() {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.setArchived(entryId = id, archived = false)
+                }
+                _uiState.update { state ->
+                    state.copy(
+                        selectedEntryIds = emptySet(),
+                        errorMessage = null,
+                    )
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to unarchive entries") }
+            }
+        }
+    }
+
+    fun batchDelete() {
+        val ids = _uiState.value.selectedEntryIds.toList()
+        if (ids.isEmpty()) return
+        val idSet = ids.toSet()
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    entryRepository.softDeleteEntry(id)
+                }
+                _uiState.update { state ->
+                    val clearingReply = state.replyTarget?.entry?.id in idSet
+                    val clearingEdit = state.editingEntry?.entry?.id in idSet
+                    val nextSelectedTags = if (clearingReply) {
+                        val cleaned = state.selectedTagIds.filterNot { it in autoAttachedReplyTagIds }
+                        autoAttachedReplyTagIds = emptySet()
+                        cleaned
+                    } else {
+                        state.selectedTagIds
+                    }
+                    state.copy(
+                        selectedEntryIds = emptySet(),
+                        undoDeletedEntryIds = ids,
+                        replyTarget = if (clearingReply) null else state.replyTarget,
+                        editingEntry = if (clearingEdit) null else state.editingEntry,
+                        editingKeptAttachments = if (clearingEdit) emptyList() else state.editingKeptAttachments,
+                        removedEditingAttachmentIds = if (clearingEdit) emptySet() else state.removedEditingAttachmentIds,
+                        pendingAttachments = if (clearingEdit) emptyList() else state.pendingAttachments,
+                        selectedTagIds = nextSelectedTags,
+                        errorMessage = null,
+                    )
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to delete entries") }
+            }
+        }
     }
 
     fun toggleComposerTask() {
@@ -369,7 +742,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val filter = activeFilterFlow.value
-                val includeHidden = filter == ChatFeedFilter.All && showHiddenPlaceholdersFlow.value
+                val includeHidden = filter is ChatFeedFilter.All && showHiddenPlaceholdersFlow.value
                 var resolvedEntryId: String? = null
                 var offset: Int? = null
 
@@ -420,7 +793,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val currentFilter = activeFilterFlow.value
-                val includeHiddenCurrent = currentFilter == ChatFeedFilter.All && showHiddenPlaceholdersFlow.value
+                val includeHiddenCurrent = currentFilter is ChatFeedFilter.All && showHiddenPlaceholdersFlow.value
                 val currentOffset = entryRepository.findEntryOffset(
                     entryId = entryId,
                     filter = currentFilter,
@@ -437,19 +810,20 @@ class ChatViewModel @Inject constructor(
                     return@launch
                 }
 
-                if (currentFilter != ChatFeedFilter.All) {
+                val unfilteredAll = ChatFeedFilter.All()
+                if (currentFilter != unfilteredAll) {
                     val allOffset = entryRepository.findEntryOffset(
                         entryId = entryId,
-                        filter = ChatFeedFilter.All,
+                        filter = unfilteredAll,
                         includeHiddenPlaceholders = showHiddenPlaceholdersFlow.value,
                     )
                     if (allOffset != null) {
-                        setFeedFilter(ChatFeedFilter.All)
-                        onFilterChanged(ChatFeedFilter.All)
+                        setFeedFilter(unfilteredAll)
+                        onFilterChanged(unfilteredAll)
                         val request = PendingJumpRequest(
                             offset = allOffset,
                             targetEntryId = entryId,
-                            targetFilter = ChatFeedFilter.All,
+                            targetFilter = unfilteredAll,
                             nonce = ++jumpRequestSeq,
                         )
                         _uiState.update { it.copy(pendingJump = request) }
@@ -561,7 +935,8 @@ class ChatViewModel @Inject constructor(
                         state.selectedTagIds
                     }
                     state.copy(
-                        undoArchivedEntryId = entryId,
+                        selectedEntryIds = state.selectedEntryIds - entryId,
+                        undoArchivedEntryIds = listOf(entryId),
                         replyTarget = if (clearingReply) null else state.replyTarget,
                         editingEntry = if (clearingEdit) null else state.editingEntry,
                         editingKeptAttachments = if (clearingEdit) emptyList() else state.editingKeptAttachments,
@@ -580,11 +955,14 @@ class ChatViewModel @Inject constructor(
     }
 
     fun undoArchive() {
-        val archivedId = _uiState.value.undoArchivedEntryId ?: return
-        _uiState.update { it.copy(undoArchivedEntryId = null) }
+        val archivedIds = _uiState.value.undoArchivedEntryIds
+        if (archivedIds.isEmpty()) return
+        _uiState.update { it.copy(undoArchivedEntryIds = emptyList()) }
         viewModelScope.launch {
             try {
-                entryRepository.setArchived(entryId = archivedId, archived = false)
+                archivedIds.forEach { archivedId ->
+                    entryRepository.setArchived(entryId = archivedId, archived = false)
+                }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
@@ -594,7 +972,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun clearUndoArchive() {
-        _uiState.update { it.copy(undoArchivedEntryId = null) }
+        _uiState.update { it.copy(undoArchivedEntryIds = emptyList()) }
     }
 
     fun unarchiveEntry(entryId: String) {
@@ -1023,10 +1401,15 @@ class ChatViewModel @Inject constructor(
                 autoAttachedReplyTagIds = emptySet()
                 _uiState.update { state ->
                     val defaultTagsForFilter = when (val filter = state.activeFilter) {
-                        is ChatFeedFilter.TagSubtree -> listOf(filter.tagId)
+                        is ChatFeedFilter.TagSubtree -> listOf(filter.effectiveTagId)
+                        is ChatFeedFilter.Todos -> listOfNotNull(filter.tagId)
                         else -> emptyList()
                     }
-                    val defaultIsTaskForFilter = state.activeFilter is ChatFeedFilter.Todos
+                    val defaultIsTaskForFilter = when (val filter = state.activeFilter) {
+                        is ChatFeedFilter.Todos -> true
+                        is ChatFeedFilter.TagSubtree -> filter.todoFilterMode != null
+                        else -> false
+                    }
                     val nextCustomTs = if (state.keepBackdateAfterSend && state.composerCustomTimestampMs != null) {
                         state.composerCustomTimestampMs + 60_000L
                     } else {
@@ -1062,6 +1445,7 @@ class ChatViewModel @Inject constructor(
 
     fun deleteTag(
         tagId: String,
+        onActiveFilterUpdated: ((ChatFeedFilter) -> Unit)? = null,
         onActiveFilterCleared: () -> Unit = {},
     ) {
         val currentState = _uiState.value
@@ -1080,23 +1464,84 @@ class ChatViewModel @Inject constructor(
             try {
                 tagRepository.deleteTag(tagId)
                 val currentFilter = activeFilterFlow.value
-                val filterWasDeleted = currentFilter is ChatFeedFilter.TagSubtree &&
-                    (
-                        currentFilter.tagId in deletedIds ||
+                var updatedFilter: ChatFeedFilter? = null
+                var resetToAll = false
+                var reattachTagId: String? = null
+
+                when (currentFilter) {
+                    is ChatFeedFilter.TagSubtree -> {
+                        val rootWasDeleted = currentFilter.tagId in deletedIds ||
                             (targetTag != null && currentFilter.fullPath.startsWith("${targetTag.fullPath}/", ignoreCase = true))
-                        )
-                if (filterWasDeleted) {
-                    autoAttachedFilterTagId = null
-                    activeFilterFlow.value = ChatFeedFilter.All
-                    onActiveFilterCleared()
+                        val subTagWasDeleted = !rootWasDeleted &&
+                            currentFilter.selectedSubTagId != null &&
+                            (
+                                currentFilter.selectedSubTagId in deletedIds ||
+                                    (
+                                        targetTag != null &&
+                                            currentFilter.selectedSubTagPath?.startsWith("${targetTag.fullPath}/", ignoreCase = true) == true
+                                        )
+                                )
+                        if (rootWasDeleted) {
+                            val allFilter = ChatFeedFilter.All()
+                            autoAttachedFilterTagId = null
+                            activeFilterFlow.value = allFilter
+                            updatedFilter = allFilter
+                            resetToAll = true
+                        } else if (subTagWasDeleted) {
+                            val fallback = currentFilter.copy(
+                                selectedSubTagId = null,
+                                selectedSubTagPath = null,
+                            )
+                            autoAttachedFilterTagId = fallback.effectiveTagId
+                            reattachTagId = fallback.effectiveTagId
+                            activeFilterFlow.value = fallback
+                            updatedFilter = fallback
+                        }
+                    }
+
+                    is ChatFeedFilter.Todos -> {
+                        val todoTagWasDeleted = currentFilter.tagId != null &&
+                            (
+                                currentFilter.tagId in deletedIds ||
+                                    (
+                                        targetTag != null &&
+                                            currentFilter.tagFullPath?.startsWith("${targetTag.fullPath}/", ignoreCase = true) == true
+                                        )
+                                )
+                        if (todoTagWasDeleted) {
+                            val fallback = currentFilter.copy(
+                                tagId = null,
+                                tagFullPath = null,
+                                tagDisplayLabel = null,
+                            )
+                            autoAttachedFilterTagId = null
+                            activeFilterFlow.value = fallback
+                            updatedFilter = fallback
+                        }
+                    }
+
+                    is ChatFeedFilter.All, ChatFeedFilter.Archived -> Unit
                 }
+
                 autoAttachedReplyTagIds = autoAttachedReplyTagIds - deletedIds
                 _uiState.update { state ->
+                    val cleanedTags = state.selectedTagIds.filterNot { it in deletedIds }
+                    val nextSelectedTags = if (reattachTagId != null && reattachTagId !in cleanedTags) {
+                        cleanedTags + reattachTagId
+                    } else {
+                        cleanedTags
+                    }
                     state.copy(
-                        activeFilter = if (filterWasDeleted) ChatFeedFilter.All else state.activeFilter,
-                        selectedTagIds = state.selectedTagIds.filterNot { it in deletedIds },
+                        activeFilter = updatedFilter ?: state.activeFilter,
+                        selectedTagIds = nextSelectedTags,
                         errorMessage = null,
                     )
+                }
+                if (updatedFilter != null) {
+                    onActiveFilterUpdated?.invoke(updatedFilter)
+                }
+                if (resetToAll) {
+                    onActiveFilterCleared()
                 }
             } catch (ce: CancellationException) {
                 throw ce
@@ -1121,7 +1566,8 @@ class ChatViewModel @Inject constructor(
                         state.selectedTagIds
                     }
                     state.copy(
-                        undoDeletedEntryId = entryId,
+                        selectedEntryIds = state.selectedEntryIds - entryId,
+                        undoDeletedEntryIds = listOf(entryId),
                         replyTarget = if (clearingReply) null else state.replyTarget,
                         editingEntry = if (clearingEdit) null else state.editingEntry,
                         editingKeptAttachments = if (clearingEdit) emptyList() else state.editingKeptAttachments,
@@ -1140,11 +1586,14 @@ class ChatViewModel @Inject constructor(
     }
 
     fun undoDelete() {
-        val deletedId = _uiState.value.undoDeletedEntryId ?: return
-        _uiState.update { it.copy(undoDeletedEntryId = null) }
+        val deletedIds = _uiState.value.undoDeletedEntryIds
+        if (deletedIds.isEmpty()) return
+        _uiState.update { it.copy(undoDeletedEntryIds = emptyList()) }
         viewModelScope.launch {
             try {
-                entryRepository.undoSoftDelete(deletedId)
+                deletedIds.forEach { deletedId ->
+                    entryRepository.undoSoftDelete(deletedId)
+                }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
@@ -1154,7 +1603,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun clearUndoDelete() {
-        _uiState.update { it.copy(undoDeletedEntryId = null) }
+        _uiState.update { it.copy(undoDeletedEntryIds = emptyList()) }
     }
 
     fun toggleShowHiddenAutoTags() {
@@ -1302,7 +1751,40 @@ class ChatViewModel @Inject constructor(
 
     companion object {
         private const val MAX_TAG_SUGGESTIONS = 20
+        private const val RECENT_TAGS_LIMIT = 6
         private const val JUMP_HIGHLIGHT_DURATION_MS = 1_500L
+    }
+}
+
+/**
+ * Sorts [tags] according to the persisted [TagSortOrder] using [recentTagIds] rank for
+ * [TagSortOrder.RECENT], alphabetical order for [TagSortOrder.NAME_ASC], and [TagColorPreset]
+ * palette order for [TagSortOrder.COLOR].
+ */
+internal fun sortTagsForDisplay(
+    tags: List<Tag>,
+    sortOrder: TagSortOrder,
+    recentTagIds: List<String> = emptyList(),
+): List<Tag> {
+    if (tags.size <= 1) return tags
+    val recentRank = recentTagIds.withIndex().associate { (index, id) -> id to index }
+    return when (sortOrder) {
+        TagSortOrder.RECENT, TagSortOrder.MOST_USED -> tags.sortedWith(
+            compareBy<Tag> { recentRank[it.id] ?: Int.MAX_VALUE }
+                .thenBy { it.leafName.lowercase() }
+                .thenBy { it.fullPath.lowercase() },
+        )
+
+        TagSortOrder.NAME_ASC -> tags.sortedWith(
+            compareBy<Tag> { it.leafName.lowercase() }
+                .thenBy { it.fullPath.lowercase() },
+        )
+
+        TagSortOrder.COLOR -> tags.sortedWith(
+            compareBy<Tag> { TagColorPreset.fromToken(it.colorToken)?.ordinal ?: Int.MAX_VALUE }
+                .thenBy { it.leafName.lowercase() }
+                .thenBy { it.fullPath.lowercase() },
+        )
     }
 }
 

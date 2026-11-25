@@ -303,6 +303,7 @@ class ModelSerializationTest {
             linkedMediaFolderId = "folder-456",
             lastExportIso = "2026-11-19T08:00:00Z",
             deviceId = "dev-xyz",
+            tagSortOrder = TagSortOrder.MOST_USED,
         )
         assertThat(defaultJson.decodeFromString<UserSettings>(defaultJson.encodeToString(defaultSettings)))
             .isEqualTo(defaultSettings)
@@ -334,6 +335,10 @@ class ModelSerializationTest {
         }
         RuleMatchType.entries.forEach { value ->
             assertThat(defaultJson.decodeFromString<RuleMatchType>(defaultJson.encodeToString(value)))
+                .isEqualTo(value)
+        }
+        TagSortOrder.entries.forEach { value ->
+            assertThat(defaultJson.decodeFromString<TagSortOrder>(defaultJson.encodeToString(value)))
                 .isEqualTo(value)
         }
     }

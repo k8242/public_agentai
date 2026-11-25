@@ -9,7 +9,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.k8242.threadlog.core.model.AppColorScheme
 import io.github.k8242.threadlog.core.model.DrawerOverviewSummary
 import io.github.k8242.threadlog.core.model.DrawerTagSummary
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.contract.EntryRepository
 import io.github.k8242.threadlog.core.model.contract.LeafDisambiguator
@@ -37,6 +39,7 @@ data class DrawerUiState(
     val tagDisplayLabels: Map<String, String> = emptyMap(),
     val searchQuery: String = "",
     val selectedCategory: DrawerCategoryTab = DrawerCategoryTab.ALL,
+    val tagSortOrder: TagSortOrder = TagSortOrder.RECENT,
     val pendingAutoTagCount: Int = 0,
     val showHiddenAutoTagsInChat: Boolean = false,
     val showHiddenPlaceholderMessages: Boolean = false,
@@ -46,7 +49,7 @@ data class DrawerUiState(
     val filteredTagSummaries: List<DrawerTagSummary>
         get() {
             val query = searchQuery.trim().lowercase()
-            return allTagSummaries.filter { summary ->
+            val filtered = allTagSummaries.filter { summary ->
                 val matchesCategory = when (selectedCategory) {
                     DrawerCategoryTab.ALL -> true
                     DrawerCategoryTab.TOPICS -> summary.tag.rootCategory == TagRootCategory.TOPICS
@@ -65,6 +68,26 @@ data class DrawerUiState(
                     summary.tag.fullPath.lowercase().contains(query) ||
                     summary.tag.aliases.any { it.lowercase().contains(query) }
             }
+            val comparator = when (tagSortOrder) {
+                TagSortOrder.RECENT -> compareByDescending<DrawerTagSummary> {
+                    it.latestCreatedAtMs ?: Long.MIN_VALUE
+                }.thenBy { it.tag.leafName.lowercase() }
+                    .thenBy { it.tag.fullPath.lowercase() }
+
+                TagSortOrder.NAME_ASC -> compareBy<DrawerTagSummary> {
+                    it.tag.leafName.lowercase()
+                }.thenBy { it.tag.fullPath.lowercase() }
+
+                TagSortOrder.MOST_USED -> compareByDescending<DrawerTagSummary> {
+                    it.entryCount
+                }.thenBy { it.tag.leafName.lowercase() }
+
+                TagSortOrder.COLOR -> compareBy<DrawerTagSummary> {
+                    TagColorPreset.fromToken(it.tag.colorToken)?.ordinal ?: Int.MAX_VALUE
+                }.thenBy { it.tag.rootCategory.ordinal }
+                    .thenBy { it.tag.leafName.lowercase() }
+            }
+            return filtered.sortedWith(comparator)
         }
 }
 
@@ -125,6 +148,7 @@ class DrawerViewModel @Inject constructor(
                         showHiddenPlaceholderMessages = settings.showHiddenPlaceholderMessages,
                         colorScheme = settings.colorScheme,
                         themeMode = settings.themeMode,
+                        tagSortOrder = settings.tagSortOrder,
                     )
                 }
             }
@@ -137,6 +161,25 @@ class DrawerViewModel @Inject constructor(
 
     fun onSelectCategory(tab: DrawerCategoryTab) {
         _uiState.update { it.copy(selectedCategory = tab) }
+    }
+
+    fun setTagSortOrder(sortOrder: TagSortOrder) {
+        _uiState.update { it.copy(tagSortOrder = sortOrder) }
+        viewModelScope.launch {
+            settingsRepository.setTagSortOrder(sortOrder)
+        }
+    }
+
+    fun updateTagColor(tagId: String, colorToken: String) {
+        viewModelScope.launch {
+            try {
+                tagRepository.updateTagColor(tagId, colorToken)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Keep drawer state resilient if tag was already removed concurrently.
+            }
+        }
     }
 
     fun toggleShowHiddenAutoTags() {

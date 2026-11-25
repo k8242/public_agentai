@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
@@ -59,10 +61,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -79,6 +83,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
@@ -89,7 +103,9 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import io.github.k8242.threadlog.core.model.Attachment
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.contract.PendingAttachment
 import kotlinx.coroutines.Dispatchers
@@ -357,9 +373,18 @@ fun ChatComposer(
                     items(uiState.selectedTagIds, key = { it }) { tagId ->
                         val tag = tagsById[tagId]
                         val label = uiState.tagDisplayLabels[tagId] ?: tag?.leafName ?: tagId
+                        val (chipBg, chipFg) = tagColorPair(
+                            colorToken = tag?.colorToken ?: TagColorPreset.DEFAULT.token,
+                            rootCategory = tag?.rootCategory,
+                        )
                         InputChip(
                             selected = true,
                             onClick = { onToggleSelectedTag(tagId) },
+                            colors = InputChipDefaults.inputChipColors(
+                                selectedContainerColor = chipBg,
+                                selectedLabelColor = chipFg,
+                                selectedTrailingIconColor = chipFg,
+                            ),
                             label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
                             trailingIcon = {
                                 Icon(
@@ -453,6 +478,15 @@ fun ChatComposer(
                     }
                 }
 
+                val canSend = if (uiState.editingEntry != null) {
+                    uiState.composerText.isNotBlank() ||
+                        uiState.editingKeptAttachments.isNotEmpty() ||
+                        uiState.pendingAttachments.isNotEmpty()
+                } else {
+                    uiState.composerText.isNotBlank() || uiState.pendingAttachments.isNotEmpty()
+                }
+                val sendEnabled = canSend && !uiState.isCompressingImage
+
                 OutlinedTextField(
                     value = fieldValue,
                     onValueChange = { next ->
@@ -474,20 +508,34 @@ fun ChatComposer(
                     shape = RoundedCornerShape(22.dp),
                     modifier = Modifier
                         .weight(1f)
+                        .onPreviewKeyEvent { event ->
+                            val isEnter = event.key == Key.Enter || event.key == Key.NumPadEnter
+                            val isShiftOnly = event.isShiftPressed &&
+                                !event.isCtrlPressed &&
+                                !event.isAltPressed &&
+                                !event.isMetaPressed
+                            if (isEnter && isShiftOnly) {
+                                when (event.type) {
+                                    KeyEventType.KeyDown -> {
+                                        if (sendEnabled) {
+                                            onSendOrSave()
+                                        }
+                                        true
+                                    }
+
+                                    KeyEventType.KeyUp -> true
+                                    else -> false
+                                }
+                            } else {
+                                false
+                            }
+                        }
                         .contentReceiver(receiveContentListener),
                 )
 
-                val canSend = if (uiState.editingEntry != null) {
-                    uiState.composerText.isNotBlank() ||
-                        uiState.editingKeptAttachments.isNotEmpty() ||
-                        uiState.pendingAttachments.isNotEmpty()
-                } else {
-                    uiState.composerText.isNotBlank() || uiState.pendingAttachments.isNotEmpty()
-                }
-
                 FilledIconButton(
                     onClick = onSendOrSave,
-                    enabled = canSend && !uiState.isCompressingImage,
+                    enabled = sendEnabled,
                 ) {
                     Icon(
                         imageVector = if (uiState.editingEntry != null) {
@@ -571,7 +619,7 @@ private fun TagSuggestionList(
         }
         items(suggestions, key = { it.id }) { tag ->
             val label = tagDisplayLabels[tag.id] ?: tag.leafName
-            val (badgeBg, badgeFg) = tagColorPair(tag.colorToken)
+            val (badgeBg, badgeFg) = tagColorPair(tag.colorToken, tag.rootCategory)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -806,15 +854,22 @@ fun QuickTagPickerSheet(
     onCreateTagPath: (fullPath: String) -> Unit,
     onDeleteTag: (tagId: String) -> Unit,
     onDismiss: () -> Unit,
+    recentTags: List<Tag> = emptyList(),
+    tagSortOrder: TagSortOrder = TagSortOrder.RECENT,
+    onUpdateTagColor: (tagId: String, colorToken: String) -> Unit = { _, _ -> },
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var newTagPath by remember { mutableStateOf("") }
     var deleteMode by remember { mutableStateOf(false) }
+    var colorMode by remember { mutableStateOf(false) }
     var pendingDeleteTag by remember { mutableStateOf<Tag?>(null) }
+    var pendingColorTag by remember { mutableStateOf<Tag?>(null) }
 
-    val groupedTags = remember(allTags) {
+    val recentTagIds = remember(recentTags) { recentTags.map { it.id } }
+    val groupedTags = remember(allTags, tagSortOrder, recentTagIds) {
         allTags
             .groupBy { it.rootCategory }
+            .mapValues { (_, tags) -> sortTagsForDisplay(tags, tagSortOrder, recentTagIds) }
             .toSortedMap(compareBy { it.ordinal })
     }
 
@@ -837,10 +892,28 @@ fun QuickTagPickerSheet(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 if (allTags.isNotEmpty()) {
-                    TextButton(onClick = { deleteMode = !deleteMode }) {
+                    TextButton(
+                        onClick = {
+                            colorMode = !colorMode
+                            if (colorMode) deleteMode = false
+                        },
+                    ) {
+                        Text(
+                            text = if (colorMode) "Done" else "Colors",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            deleteMode = !deleteMode
+                            if (deleteMode) colorMode = false
+                        },
+                    ) {
                         Text(
                             text = if (deleteMode) "Done" else "Delete tags",
                             color = if (deleteMode) {
@@ -858,6 +931,12 @@ fun QuickTagPickerSheet(
                     text = "Tap any tag below to delete it. Your journal notes will not be deleted.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
+                )
+            } else if (colorMode) {
+                Text(
+                    text = "Tap any tag below to pick a custom color.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
 
@@ -917,29 +996,88 @@ fun QuickTagPickerSheet(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    tags.sortedBy { it.leafName.lowercase() }.forEach { tag ->
+                                    tags.forEach { tag ->
                                         val isSelected = tag.id in selectedTagIds
                                         val label = tagDisplayLabels[tag.id] ?: tag.leafName
-                                        if (deleteMode) {
-                                            InputChip(
-                                                selected = false,
-                                                onClick = { pendingDeleteTag = tag },
-                                                label = { Text(label) },
-                                                trailingIcon = {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.Delete,
-                                                        contentDescription = "Delete tag $label",
-                                                        tint = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.size(16.dp),
-                                                    )
-                                                },
-                                            )
-                                        } else {
-                                            FilterChip(
-                                                selected = isSelected,
-                                                onClick = { onToggleTag(tag.id, isSelected) },
-                                                label = { Text(label) },
-                                            )
+                                        val (chipBg, chipFg) = tagColorPair(tag.colorToken, tag.rootCategory)
+                                        when {
+                                            deleteMode -> {
+                                                InputChip(
+                                                    selected = false,
+                                                    onClick = { pendingDeleteTag = tag },
+                                                    colors = InputChipDefaults.inputChipColors(
+                                                        containerColor = chipBg,
+                                                        labelColor = chipFg,
+                                                    ),
+                                                    label = { Text(label) },
+                                                    trailingIcon = {
+                                                        Icon(
+                                                            imageVector = Icons.Outlined.Delete,
+                                                            contentDescription = "Delete tag $label",
+                                                            tint = MaterialTheme.colorScheme.error,
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                    },
+                                                )
+                                            }
+
+                                            colorMode -> {
+                                                InputChip(
+                                                    selected = false,
+                                                    onClick = { pendingColorTag = tag },
+                                                    colors = InputChipDefaults.inputChipColors(
+                                                        containerColor = chipBg,
+                                                        labelColor = chipFg,
+                                                        trailingIconColor = chipFg,
+                                                    ),
+                                                    label = { Text(label) },
+                                                    trailingIcon = {
+                                                        Icon(
+                                                            imageVector = Icons.Outlined.Palette,
+                                                            contentDescription = "Change color for $label",
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                    },
+                                                )
+                                            }
+
+                                            else -> {
+                                                FilterChip(
+                                                    selected = isSelected,
+                                                    onClick = { onToggleTag(tag.id, isSelected) },
+                                                    colors = FilterChipDefaults.filterChipColors(
+                                                        containerColor = chipBg.copy(alpha = 0.55f),
+                                                        labelColor = chipFg,
+                                                        selectedContainerColor = chipBg,
+                                                        selectedLabelColor = chipFg,
+                                                        selectedLeadingIconColor = chipFg,
+                                                    ),
+                                                    border = FilterChipDefaults.filterChipBorder(
+                                                        enabled = true,
+                                                        selected = isSelected,
+                                                        borderColor = chipFg.copy(alpha = 0.25f),
+                                                        selectedBorderColor = chipFg,
+                                                        selectedBorderWidth = 1.5.dp,
+                                                    ),
+                                                    leadingIcon = if (isSelected) {
+                                                        {
+                                                            Icon(
+                                                                imageVector = Icons.Outlined.Check,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(14.dp),
+                                                            )
+                                                        }
+                                                    } else {
+                                                        null
+                                                    },
+                                                    label = {
+                                                        Text(
+                                                            text = label,
+                                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        )
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -951,6 +1089,19 @@ fun QuickTagPickerSheet(
 
             Spacer(modifier = Modifier.height(4.dp))
         }
+    }
+
+    pendingColorTag?.let { target ->
+        val label = tagDisplayLabels[target.id] ?: target.leafName
+        TagColorPickerDialog(
+            tagLabel = label,
+            currentColorToken = target.colorToken,
+            onSelectPreset = { preset ->
+                onUpdateTagColor(target.id, preset.token)
+                pendingColorTag = null
+            },
+            onDismiss = { pendingColorTag = null },
+        )
     }
 
     pendingDeleteTag?.let { target ->
@@ -989,6 +1140,78 @@ fun QuickTagPickerSheet(
             },
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagColorPickerDialog(
+    tagLabel: String,
+    currentColorToken: String,
+    onSelectPreset: (TagColorPreset) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val activePreset = TagColorPreset.fromToken(currentColorToken) ?: TagColorPreset.DEFAULT
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Color for \"$tagLabel\"") },
+        text = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TagColorPreset.entries.forEach { preset ->
+                    val isCurrent = preset == activePreset
+                    val swatchColor = Color(preset.swatchArgb)
+                    Surface(
+                        color = if (isCurrent) {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(
+                            width = if (isCurrent) 1.5.dp else 0.75.dp,
+                            color = if (isCurrent) swatchColor else MaterialTheme.colorScheme.outlineVariant,
+                        ),
+                        modifier = Modifier.clickable { onSelectPreset(preset) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(swatchColor),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isCurrent) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 private fun categoryDisplayName(category: TagRootCategory): String = when (category) {

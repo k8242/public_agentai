@@ -16,11 +16,14 @@ import io.github.k8242.threadlog.core.model.Entry
 import io.github.k8242.threadlog.core.model.EntryTag
 import io.github.k8242.threadlog.core.model.EntryWithDetails
 import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.TagState
 import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.model.TimelineDateBucket
+import io.github.k8242.threadlog.core.model.TodoCounts
 import io.github.k8242.threadlog.core.model.TodoFilterMode
 import io.github.k8242.threadlog.core.model.TodoSortOrder
 import io.github.k8242.threadlog.core.model.UserSettings
@@ -390,7 +393,7 @@ class ChatViewModelTest {
         assertThat(entryRepo.createdCalls.single().userTagIds).contains("t-lex")
         assertThat(vm.uiState.value.selectedTagIds).contains("t-lex")
 
-        vm.setFeedFilter(io.github.k8242.threadlog.core.model.ChatFeedFilter.All)
+        vm.setFeedFilter(io.github.k8242.threadlog.core.model.ChatFeedFilter.All())
         assertThat(vm.uiState.value.selectedTagIds).doesNotContain("t-lex")
     }
 
@@ -505,7 +508,7 @@ class ChatViewModelTest {
         assertThat(tagRepo.deletedTagIds).containsExactly(lexTag.id)
         assertThat(clearedCallbackInvoked).isTrue()
         assertThat(vm.uiState.value.activeFilter)
-            .isEqualTo(io.github.k8242.threadlog.core.model.ChatFeedFilter.All)
+            .isEqualTo(io.github.k8242.threadlog.core.model.ChatFeedFilter.All())
         assertThat(vm.uiState.value.selectedTagIds).doesNotContain(lexTag.id)
     }
 
@@ -552,8 +555,8 @@ class ChatViewModelTest {
         val vm = createViewModel()
         advanceUntilIdle()
 
-        entryRepo.entryOffsets["entry-old" to ChatFeedFilter.All] = 142
-        entryRepo.dateOffsets["2022-08-13" to ChatFeedFilter.All] = 300
+        entryRepo.entryOffsets["entry-old" to ChatFeedFilter.All()] = 142
+        entryRepo.dateOffsets["2022-08-13" to ChatFeedFilter.All()] = 300
 
         vm.resolveJumpTarget(entryId = "entry-old", localDate = "2022-08-13")
         advanceUntilIdle()
@@ -562,7 +565,7 @@ class ChatViewModelTest {
         assertThat(pending).isNotNull()
         assertThat(pending?.offset).isEqualTo(142)
         assertThat(pending?.targetEntryId).isEqualTo("entry-old")
-        assertThat(pending?.targetFilter).isEqualTo(ChatFeedFilter.All)
+        assertThat(pending?.targetFilter).isEqualTo(ChatFeedFilter.All())
 
         vm.consumePendingJump(pending!!.nonce)
         assertThat(vm.uiState.value.pendingJump).isNull()
@@ -588,14 +591,14 @@ class ChatViewModelTest {
 
         val todosFilter = ChatFeedFilter.Todos(mode = TodoFilterMode.OPEN)
         vm.setFeedFilter(todosFilter)
-        entryRepo.entryOffsets["parent-in-all" to ChatFeedFilter.All] = 88
+        entryRepo.entryOffsets["parent-in-all" to ChatFeedFilter.All()] = 88
 
         var switchedFilter: ChatFeedFilter? = null
         vm.jumpToReplyParent("parent-in-all") { switchedFilter = it }
         advanceUntilIdle()
 
-        assertThat(switchedFilter).isEqualTo(ChatFeedFilter.All)
-        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.All)
+        assertThat(switchedFilter).isEqualTo(ChatFeedFilter.All())
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.All())
         assertThat(vm.uiState.value.pendingJump?.offset).isEqualTo(88)
         assertThat(vm.uiState.value.pendingJump?.targetEntryId).isEqualTo("parent-in-all")
 
@@ -861,13 +864,13 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isFalse()
-        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All to false)
+        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All() to false)
 
         vm.toggleShowHiddenPlaceholderMessages()
         advanceUntilIdle()
         assertThat(vm.uiState.value.showHiddenPlaceholderMessages).isTrue()
         assertThat(settingsRepo.getSettings().showHiddenPlaceholderMessages).isTrue()
-        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All to true)
+        assertThat(entryRepo.observedTimelineQueries.last()).isEqualTo(ChatFeedFilter.All() to true)
 
         // Switching to TODOs must pass includeHiddenPlaceholders = false even when setting is true
         vm.setFeedFilter(ChatFeedFilter.Todos())
@@ -882,6 +885,293 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertThat(vm.uiState.value.timelineIndex.totalCount).isEqualTo(5)
         assertThat(vm.timelinePeriodMeta(3)?.monthLabel).isEqualTo("August 2022")
+    }
+
+    @Test
+    fun recentTags_tagSortOrder_andUpdateTagColor_syncAndSortCorrectly() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        tagRepo.recentTagsFlow.value = listOf(journalProjectTag, lexTag)
+        settingsRepo.setTagSortOrder(TagSortOrder.COLOR)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.recentTags).containsExactly(journalProjectTag, lexTag).inOrder()
+        assertThat(vm.uiState.value.tagSortOrder).isEqualTo(TagSortOrder.COLOR)
+
+        vm.updateTagColor(lexTag.id, TagColorPreset.CORAL.token)
+        advanceUntilIdle()
+        assertThat(tagRepo.colorUpdates).containsExactly(lexTag.id to "coral")
+
+        val coralTag = lexTag.copy(colorToken = TagColorPreset.CORAL.token)
+        val skyTag = alexWorkTag.copy(colorToken = TagColorPreset.SKY.token)
+        val defaultTag = journalProjectTag.copy(colorToken = "projects")
+        val input = listOf(defaultTag, skyTag, coralTag)
+
+        assertThat(sortTagsForDisplay(input, TagSortOrder.RECENT, listOf(journalProjectTag.id, lexTag.id)))
+            .containsExactly(defaultTag, coralTag, skyTag).inOrder()
+        assertThat(sortTagsForDisplay(input, TagSortOrder.NAME_ASC))
+            .containsExactly(skyTag, defaultTag, coralTag).inOrder()
+        assertThat(sortTagsForDisplay(input, TagSortOrder.COLOR))
+            .containsExactly(coralTag, skyTag, defaultTag).inOrder()
+    }
+
+    @Test
+    fun allNotesFilters_toggleUntaggedOnlyAndHideTodos_preserveEachOther() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.All())
+
+        vm.toggleAllUntaggedOnly()
+        assertThat(vm.uiState.value.activeFilter)
+            .isEqualTo(ChatFeedFilter.All(untaggedOnly = true, hideTodos = false))
+
+        vm.toggleAllHideTodos()
+        assertThat(vm.uiState.value.activeFilter)
+            .isEqualTo(ChatFeedFilter.All(untaggedOnly = true, hideTodos = true))
+
+        vm.toggleAllUntaggedOnly()
+        assertThat(vm.uiState.value.activeFilter)
+            .isEqualTo(ChatFeedFilter.All(untaggedOnly = false, hideTodos = true))
+    }
+
+    @Test
+    fun multiSelect_buildCopiedTextForSelected_resolvesMissingIdsSortsChronologicallyAndFormats() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val newerLoaded = sampleEntry("e-2", "Ship feature").let { base ->
+            base.copy(
+                entry = base.entry.copy(
+                    createdAtMs = 2_000L,
+                    taskStatus = TaskStatus.TODO,
+                    taskPriority = TaskPriority.HIGH,
+                ),
+            )
+        }
+        val olderFromDb = sampleEntry("e-1", "Brainstorm spec").let { base ->
+            base.copy(
+                entry = base.entry.copy(
+                    createdAtMs = 1_000L,
+                    taskStatus = TaskStatus.DONE,
+                    taskPriority = TaskPriority.NONE,
+                ),
+                tags = emptyList(),
+            )
+        }
+        val regularNote = sampleEntry("e-3", "Plain note").let { base ->
+            base.copy(
+                entry = base.entry.copy(createdAtMs = 3_000L),
+                tags = emptyList(),
+            )
+        }
+        entryRepo.entriesById["e-1"] = olderFromDb
+
+        vm.enterSelectionMode("e-2")
+        vm.selectEntries(listOf("e-3", "e-1"))
+        assertThat(vm.uiState.value.isSelectionMode).isTrue()
+        assertThat(vm.uiState.value.selectedEntryIds).containsExactly("e-1", "e-2", "e-3")
+
+        val copied = vm.buildCopiedTextForSelected(
+            loadedById = mapOf(
+                "e-2" to newerLoaded,
+                "e-3" to regularNote,
+            ),
+        )
+        assertThat(copied).isEqualTo(
+            "1. [DONE] Brainstorm spec\n" +
+                "2. [TODO] [HIGH] #Lex Ship feature\n" +
+                "3. Plain note",
+        )
+    }
+
+    @Test
+    fun multiSelect_batchActions_batchUndo_andClearOnFilterChange() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        vm.enterSelectionMode("e-1")
+        vm.toggleEntrySelection("e-2")
+        assertThat(vm.uiState.value.selectedEntryIds).containsExactly("e-1", "e-2")
+
+        vm.batchSetTag(lexTag.id, attached = true)
+        vm.batchSetTaskStatus(TaskStatus.TODO)
+        vm.batchSetTaskPriority(TaskPriority.MEDIUM)
+        vm.batchSetHighlighted(true)
+        advanceUntilIdle()
+
+        assertThat(tagRepo.setUserTagCalls).containsExactly(
+            Triple("e-1", lexTag.id, true),
+            Triple("e-2", lexTag.id, true),
+        )
+        assertThat(entryRepo.taskStatusUpdates).containsExactly(
+            "e-1" to TaskStatus.TODO,
+            "e-2" to TaskStatus.TODO,
+        )
+        assertThat(entryRepo.taskPriorityUpdates).containsExactly(
+            "e-1" to TaskPriority.MEDIUM,
+            "e-2" to TaskPriority.MEDIUM,
+        )
+        assertThat(entryRepo.highlightUpdates).containsExactly(
+            "e-1" to true,
+            "e-2" to true,
+        )
+
+        // Batch archive + multi-ID undo
+        vm.batchArchive()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedEntryIds).isEmpty()
+        assertThat(vm.uiState.value.undoArchivedEntryIds).containsExactly("e-1", "e-2")
+        assertThat(entryRepo.archivedUpdates).containsExactly("e-1" to true, "e-2" to true)
+
+        vm.undoArchive()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.undoArchivedEntryIds).isEmpty()
+        assertThat(entryRepo.archivedUpdates).containsExactly(
+            "e-1" to true,
+            "e-2" to true,
+            "e-1" to false,
+            "e-2" to false,
+        ).inOrder()
+
+        // Batch delete + multi-ID undo
+        vm.selectEntries(listOf("e-3", "e-4"))
+        vm.batchDelete()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedEntryIds).isEmpty()
+        assertThat(vm.uiState.value.undoDeletedEntryIds).containsExactly("e-3", "e-4")
+        assertThat(entryRepo.softDeletedIds).containsExactly("e-3", "e-4")
+
+        vm.undoDelete()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.undoDeletedEntryIds).isEmpty()
+        assertThat(entryRepo.restoredIds).containsExactly("e-3", "e-4")
+
+        // Changing filter clears selection
+        vm.enterSelectionMode("e-5")
+        assertThat(vm.uiState.value.isSelectionMode).isTrue()
+        vm.setFeedFilter(ChatFeedFilter.Todos())
+        assertThat(vm.uiState.value.isSelectionMode).isFalse()
+        assertThat(vm.uiState.value.selectedEntryIds).isEmpty()
+    }
+
+    @Test
+    fun selectSubTag_attachesEffectiveTag_andDeletingOnlySubTagFallsBackToRootTab() = runTest(testDispatcher) {
+        val bugsSubTag = Tag(
+            id = "tag-journal-bugs",
+            parentId = journalProjectTag.id,
+            fullPath = "projects/journal-app/bugs",
+            leafName = "bugs",
+            rootCategory = TagRootCategory.PROJECTS,
+            colorToken = "coral",
+        )
+        tagRepo.addTag(bugsSubTag)
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        val rootFilter = ChatFeedFilter.TagSubtree(
+            tagId = journalProjectTag.id,
+            fullPath = journalProjectTag.fullPath,
+            displayLabel = "journal-app",
+        )
+        vm.setFeedFilter(rootFilter)
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(journalProjectTag.id)
+
+        // Selecting sub-tag keeps root anchored and switches composer auto-tag to sub-tag
+        vm.selectSubTag(bugsSubTag)
+        val withSub = vm.uiState.value.activeFilter as ChatFeedFilter.TagSubtree
+        assertThat(withSub.tagId).isEqualTo(journalProjectTag.id)
+        assertThat(withSub.selectedSubTagId).isEqualTo(bugsSubTag.id)
+        assertThat(withSub.effectiveTagId).isEqualTo(bugsSubTag.id)
+        assertThat(withSub.effectiveFullPath).isEqualTo(bugsSubTag.fullPath)
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(bugsSubTag.id)
+
+        // Deleting ONLY the sub-tag resets selectedSubTagId to null (root tab), NOT All()
+        var updatedFilter: ChatFeedFilter? = null
+        var clearedToAll = false
+        vm.deleteTag(
+            tagId = bugsSubTag.id,
+            onActiveFilterUpdated = { updatedFilter = it },
+            onActiveFilterCleared = { clearedToAll = true },
+        )
+        advanceUntilIdle()
+
+        assertThat(clearedToAll).isFalse()
+        assertThat(updatedFilter).isEqualTo(rootFilter)
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(rootFilter)
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(journalProjectTag.id)
+    }
+
+    @Test
+    fun bidirectionalTodoTagCrossFiltering_updatesCountsComposerAndCleansDeletedTag() = runTest(testDispatcher) {
+        entryRepo.todoCountsByTagPath[null] = MutableStateFlow(TodoCounts(openCount = 10, completedCount = 4))
+        entryRepo.todoCountsByTagPath[journalProjectTag.fullPath] =
+            MutableStateFlow(TodoCounts(openCount = 3, completedCount = 1))
+
+        val vm = createViewModel()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.openTodoCount).isEqualTo(10)
+        assertThat(vm.uiState.value.completedTodoCount).isEqualTo(4)
+
+        // 1. Filter TODOs view by Tag -> scopes counts & pre-attaches tag + composerIsTask
+        vm.setFeedFilter(ChatFeedFilter.Todos())
+        vm.setTodoTagFilter(journalProjectTag)
+        advanceUntilIdle()
+
+        val todosWithTag = vm.uiState.value.activeFilter as ChatFeedFilter.Todos
+        assertThat(todosWithTag.tagId).isEqualTo(journalProjectTag.id)
+        assertThat(todosWithTag.tagFullPath).isEqualTo(journalProjectTag.fullPath)
+        assertThat(vm.uiState.value.composerIsTask).isTrue()
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(journalProjectTag.id)
+        assertThat(vm.uiState.value.openTodoCount).isEqualTo(3)
+        assertThat(vm.uiState.value.completedTodoCount).isEqualTo(1)
+
+        // Deleting the tag currently used in Todos filter clears only the tag filter
+        var updatedTodosFilter: ChatFeedFilter? = null
+        vm.deleteTag(
+            tagId = journalProjectTag.id,
+            onActiveFilterUpdated = { updatedTodosFilter = it },
+        )
+        advanceUntilIdle()
+        assertThat(updatedTodosFilter).isEqualTo(ChatFeedFilter.Todos())
+        assertThat(vm.uiState.value.activeFilter).isEqualTo(ChatFeedFilter.Todos())
+        assertThat(vm.uiState.value.selectedTagIds).doesNotContain(journalProjectTag.id)
+
+        // 2. Filter Tag view by TODOs -> enables composerIsTask, priority & sort
+        entryRepo.todoCountsByTagPath[lexTag.fullPath] =
+            MutableStateFlow(TodoCounts(openCount = 2, completedCount = 5))
+        vm.setFeedFilter(
+            ChatFeedFilter.TagSubtree(
+                tagId = lexTag.id,
+                fullPath = lexTag.fullPath,
+                displayLabel = "Lex",
+            ),
+        )
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.composerIsTask).isFalse()
+        assertThat(vm.uiState.value.openTodoCount).isEqualTo(2)
+        assertThat(vm.uiState.value.completedTodoCount).isEqualTo(5)
+
+        vm.setTagTodoFilterMode(TodoFilterMode.OPEN)
+        vm.setTagTodoPriorityFilter(TaskPriority.HIGH)
+        vm.toggleTagTodoSortOrder()
+        advanceUntilIdle()
+
+        val tagTodos = vm.uiState.value.activeFilter as ChatFeedFilter.TagSubtree
+        assertThat(tagTodos.todoFilterMode).isEqualTo(TodoFilterMode.OPEN)
+        assertThat(tagTodos.priorityFilter).isEqualTo(TaskPriority.HIGH)
+        assertThat(tagTodos.todoSortOrder).isEqualTo(TodoSortOrder.PRIORITY)
+        assertThat(vm.uiState.value.composerIsTask).isTrue()
+        assertThat(vm.uiState.value.selectedTagIds).containsExactly(lexTag.id)
+
+        // Clearing back to "All notes" disables composerIsTask & resets priority/sort
+        vm.setTagTodoFilterMode(null)
+        val resetTag = vm.uiState.value.activeFilter as ChatFeedFilter.TagSubtree
+        assertThat(resetTag.todoFilterMode).isNull()
+        assertThat(resetTag.priorityFilter).isNull()
+        assertThat(resetTag.todoSortOrder).isEqualTo(TodoSortOrder.NEWEST)
+        assertThat(vm.uiState.value.composerIsTask).isFalse()
     }
 
     private data class CreatedCall(
@@ -929,6 +1219,8 @@ class ChatViewModelTest {
         val observedTimelineQueries = mutableListOf<Pair<ChatFeedFilter, Boolean>>()
         val entryOffsets = mutableMapOf<Pair<String, ChatFeedFilter>, Int>()
         val dateOffsets = mutableMapOf<Pair<String, ChatFeedFilter>, Int>()
+        val entriesById = mutableMapOf<String, EntryWithDetails>()
+        val todoCountsByTagPath = mutableMapOf<String?, MutableStateFlow<TodoCounts>>()
         val pendingAutoTagFlow = MutableStateFlow<List<EntryWithDetails>>(emptyList())
         val timelineBucketsFlow = MutableStateFlow<List<TimelineDateBucket>>(emptyList())
 
@@ -940,8 +1232,11 @@ class ChatViewModelTest {
             includeHiddenPlaceholders: Boolean,
         ): Flow<PagingData<EntryWithDetails>> = flowOf(PagingData.empty())
 
-        override fun observeEntry(entryId: String): Flow<EntryWithDetails?> = flowOf(null)
-        override suspend fun getEntry(entryId: String): EntryWithDetails? = null
+        override fun observeEntry(entryId: String): Flow<EntryWithDetails?> = flowOf(entriesById[entryId])
+        override suspend fun getEntry(entryId: String): EntryWithDetails? = entriesById[entryId]
+
+        override fun observeTodoCounts(tagFullPath: String?): Flow<TodoCounts> =
+            todoCountsByTagPath.getOrPut(tagFullPath) { MutableStateFlow(TodoCounts()) }
 
         override suspend fun createEntry(
             bodyRaw: String,
@@ -1186,12 +1481,19 @@ class ChatViewModelTest {
 
     private class FakeTagRepository(initialTags: List<Tag>) : TagRepository {
         private val tagsFlow = MutableStateFlow(initialTags)
+        val recentTagsFlow = MutableStateFlow<List<Tag>>(emptyList())
         val promotedCalls = mutableListOf<Pair<String, String>>()
         val rejectedCalls = mutableListOf<Pair<String, String>>()
         val setUserTagCalls = mutableListOf<Triple<String, String, Boolean>>()
         val deletedTagIds = mutableListOf<String>()
+        val colorUpdates = mutableListOf<Pair<String, String>>()
+
+        fun addTag(tag: Tag) {
+            tagsFlow.value = tagsFlow.value + tag
+        }
 
         override fun observeAllTags(): Flow<List<Tag>> = tagsFlow
+        override fun observeRecentTags(limit: Int): Flow<List<Tag>> = recentTagsFlow
         override suspend fun getAllTags(): List<Tag> = tagsFlow.value
 
         override suspend fun createOrGetTagByPath(fullPath: String, aliases: List<String>): Tag {
@@ -1212,6 +1514,13 @@ class ChatViewModelTest {
 
         override suspend fun renameOrMoveTag(tagId: String, newFullPath: String) = Unit
         override suspend fun updateAliases(tagId: String, aliases: List<String>) = Unit
+        override suspend fun updateTagColor(tagId: String, colorToken: String) {
+            colorUpdates += tagId to colorToken
+            tagsFlow.value = tagsFlow.value.map { tag ->
+                if (tag.id == tagId) tag.copy(colorToken = colorToken) else tag
+            }
+        }
+
         override suspend fun deleteTag(tagId: String) {
             deletedTagIds += tagId
             tagsFlow.value = tagsFlow.value.filterNot { it.id == tagId }
@@ -1264,6 +1573,10 @@ class ChatViewModelTest {
 
         override suspend fun setScheduledBackupCadence(cadence: BackupCadence) {
             state.value = state.value.copy(scheduledBackupCadence = cadence)
+        }
+
+        override suspend fun setTagSortOrder(sortOrder: TagSortOrder) {
+            state.value = state.value.copy(tagSortOrder = sortOrder)
         }
 
         override suspend fun updateSyncLinks(

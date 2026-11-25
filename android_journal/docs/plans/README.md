@@ -21,4 +21,5 @@ Plans are organized by type using `YYYY-MM-DD-<short-slug>.md`:
 | 2026-11-22 | Batch (Fix + Features) | [Keyboard Gap Fix, Tag Deletion, Edited Timestamps & Password/PIN Guard](batches/2026-11-22-keyboard-gap-tag-delete-edited-ts-cred-guard.md) | Implemented | `b75d613` |
 | 2026-11-22 | Feature | [Composer Backdating & WhatsApp Export Import](features/2026-11-22-backdate-and-whatsapp-import.md) | Implemented | `7726a02` |
 | 2026-11-24 | Batch (Fixes + Features) | [History Navigation Fixes, Priorities, Archive, Yellow Highlight, Media Editing & Chat Polish](batches/2026-11-24-history-scroll-priorities-archive-polish.md) | Implemented | `665cbd7` |
-| 2026-11-24 | Feature | [Adaptive Yarn, Pencil & Highlighter App Logo](features/2026-11-24-threadlog-app-logo.md) | Implemented | *(this commit)* |
+| 2026-11-24 | Feature | [Adaptive Yarn, Pencil & Highlighter App Logo](features/2026-11-24-threadlog-app-logo.md) | Implemented | `9be4c4f` |
+| 2026-11-24 | Feature | [Fast Tagging, Shift+Enter, Tag Sort/Colors, All Notes Filters, Multi-Select, Sub-Tag Tabs & TODO↔Tag Cross-Filtering](features/2026-11-24-fast-tagging-multiselect-subtabs.md) | Implemented | *(this commit)* |

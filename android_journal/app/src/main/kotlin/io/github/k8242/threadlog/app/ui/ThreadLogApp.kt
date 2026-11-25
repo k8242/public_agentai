@@ -57,7 +57,7 @@ fun ThreadLogApp(
     val drawerUiState by drawerViewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
-    var activeChatFilter by remember { mutableStateOf<ChatFeedFilter>(ChatFeedFilter.All) }
+    var activeChatFilter by remember { mutableStateOf<ChatFeedFilter>(ChatFeedFilter.All()) }
     var jumpNonce by remember { mutableLongStateOf(0L) }
 
     val isOnChatScreen = currentDestination == null || currentDestination.hasRoute<ThreadLogRoute.Chat>()
@@ -115,7 +115,7 @@ fun ThreadLogApp(
 
     fun jumpToChat(entryId: String?, localDate: String?) {
         jumpNonce += 1L
-        activeChatFilter = ChatFeedFilter.All
+        activeChatFilter = ChatFeedFilter.All()
         navController.navigate(
             ThreadLogRoute.Chat(
                 jumpToEntryId = entryId,
@@ -167,18 +167,14 @@ fun ThreadLogApp(
                 },
                 onSelectColorScheme = drawerViewModel::setColorScheme,
                 onCycleThemeMode = drawerViewModel::cycleThemeMode,
+                onSelectTagSortOrder = drawerViewModel::setTagSortOrder,
+                onUpdateTagColor = drawerViewModel::updateTagColor,
                 onDeleteTag = { summary ->
-                    val current = activeChatFilter
-                    if (current is ChatFeedFilter.TagSubtree) {
-                        val prefix = "${summary.tag.fullPath}/"
-                        if (
-                            current.tagId == summary.tag.id ||
-                            current.fullPath.equals(summary.tag.fullPath, ignoreCase = true) ||
-                            current.fullPath.startsWith(prefix, ignoreCase = true)
-                        ) {
-                            activeChatFilter = ChatFeedFilter.All
-                        }
-                    }
+                    activeChatFilter = resolveFilterAfterTagDelete(
+                        current = activeChatFilter,
+                        deletedTagId = summary.tag.id,
+                        deletedTagFullPath = summary.tag.fullPath,
+                    )
                     drawerViewModel.deleteTag(summary.tag.id)
                 },
             )
@@ -278,5 +274,51 @@ fun ThreadLogApp(
                 )
             }
         }
+    }
+}
+
+internal fun resolveFilterAfterTagDelete(
+    current: ChatFeedFilter,
+    deletedTagId: String,
+    deletedTagFullPath: String,
+): ChatFeedFilter {
+    val deletedPrefix = "$deletedTagFullPath/"
+    fun matchesDeleted(candidateId: String?, candidatePath: String?): Boolean {
+        if (candidateId != null && candidateId == deletedTagId) return true
+        if (candidatePath != null) {
+            if (candidatePath.equals(deletedTagFullPath, ignoreCase = true) ||
+                candidatePath.startsWith(deletedPrefix, ignoreCase = true)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    return when (current) {
+        is ChatFeedFilter.TagSubtree -> {
+            when {
+                matchesDeleted(current.tagId, current.fullPath) -> ChatFeedFilter.All()
+                matchesDeleted(current.selectedSubTagId, current.selectedSubTagPath) -> current.copy(
+                    selectedSubTagId = null,
+                    selectedSubTagPath = null,
+                )
+                else -> current
+            }
+        }
+
+        is ChatFeedFilter.Todos -> {
+            if (current.tagId != null && matchesDeleted(current.tagId, current.tagFullPath)) {
+                current.copy(
+                    tagId = null,
+                    tagFullPath = null,
+                    tagDisplayLabel = null,
+                )
+            } else {
+                current
+            }
+        }
+
+        else -> current
     }
 }

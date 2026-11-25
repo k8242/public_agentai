@@ -115,6 +115,10 @@ class DefaultBackupDataGateway @Inject constructor(
                     leafAliases = sheetTag.aliases,
                     preferredLeafId = sheetTag.tagId.takeIf { it.isNotBlank() },
                 )
+                val restoredColor = sheetTag.colorToken.trim().lowercase(Locale.ROOT)
+                if (restoredColor.isNotEmpty() && restoredColor != tagEntity.colorToken) {
+                    tagDao.updateColorToken(tagId = tagEntity.id, colorToken = restoredColor)
+                }
                 if (aliasesChanged) {
                     affectedEntryIds += tagDao.getEntryIdsForTag(tagEntity.id)
                 }

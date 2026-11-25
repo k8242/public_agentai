@@ -35,6 +35,7 @@ import io.github.k8242.threadlog.core.model.TagState
 import io.github.k8242.threadlog.core.model.TaskPriority
 import io.github.k8242.threadlog.core.model.TaskStatus
 import io.github.k8242.threadlog.core.model.TimelineDateBucket
+import io.github.k8242.threadlog.core.model.TodoCounts
 import io.github.k8242.threadlog.core.model.TodoFilterMode
 import io.github.k8242.threadlog.core.model.TodoSortOrder
 import io.github.k8242.threadlog.core.model.contract.DateWeekCalculator
@@ -72,7 +73,7 @@ class DefaultEntryRepository @Inject constructor(
 ) : EntryRepository {
 
     override fun observePagedEntries(): Flow<PagingData<EntryWithDetails>> =
-        observePagedEntries(filter = ChatFeedFilter.All, includeHiddenPlaceholders = false)
+        observePagedEntries(filter = ChatFeedFilter.All(), includeHiddenPlaceholders = false)
 
     override fun observePagedEntries(filter: ChatFeedFilter): Flow<PagingData<EntryWithDetails>> =
         observePagedEntries(filter = filter, includeHiddenPlaceholders = false)
@@ -90,25 +91,59 @@ class DefaultEntryRepository @Inject constructor(
             ),
             pagingSourceFactory = {
                 val delegate = when (filter) {
-                    ChatFeedFilter.All -> entryDao.pagingSourceAll(includeHidden = includeHiddenPlaceholders)
+                    is ChatFeedFilter.All -> entryDao.pagingSourceAll(
+                        includeHidden = includeHiddenPlaceholders,
+                        untaggedOnly = filter.untaggedOnly,
+                        hideTodos = filter.hideTodos,
+                    )
 
                     is ChatFeedFilter.Todos -> {
                         val statuses = todoStatusesForMode(filter.mode)
                         val priority = filter.priorityFilter?.name
+                        val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.tagFullPath)
                         when (filter.sortOrder) {
-                            TodoSortOrder.NEWEST -> entryDao.pagingSourceTodosByNewest(statuses, priority)
-                            TodoSortOrder.PRIORITY -> entryDao.pagingSourceTodosByPriority(statuses, priority)
+                            TodoSortOrder.NEWEST -> entryDao.pagingSourceTodosByNewest(
+                                statuses = statuses,
+                                priorityFilter = priority,
+                                exactTagPath = exactTagPath,
+                                subtreeLikePattern = subtreeLike,
+                            )
+
+                            TodoSortOrder.PRIORITY -> entryDao.pagingSourceTodosByPriority(
+                                statuses = statuses,
+                                priorityFilter = priority,
+                                exactTagPath = exactTagPath,
+                                subtreeLikePattern = subtreeLike,
+                            )
                         }
                     }
 
                     is ChatFeedFilter.TagSubtree -> {
-                        val normalized = TagPathNormalizer.normalize(filter.fullPath)
-                        if (normalized.isEmpty()) {
+                        val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.effectiveFullPath)
+                        val todoMode = filter.todoFilterMode
+                        if (todoMode != null) {
+                            val statuses = todoStatusesForMode(todoMode)
+                            val priority = filter.priorityFilter?.name
+                            when (filter.todoSortOrder) {
+                                TodoSortOrder.NEWEST -> entryDao.pagingSourceTodosByNewest(
+                                    statuses = statuses,
+                                    priorityFilter = priority,
+                                    exactTagPath = exactTagPath,
+                                    subtreeLikePattern = subtreeLike,
+                                )
+
+                                TodoSortOrder.PRIORITY -> entryDao.pagingSourceTodosByPriority(
+                                    statuses = statuses,
+                                    priorityFilter = priority,
+                                    exactTagPath = exactTagPath,
+                                    subtreeLikePattern = subtreeLike,
+                                )
+                            }
+                        } else if (exactTagPath == null || subtreeLike == null) {
                             entryDao.pagingSourceAll(includeHidden = false)
                         } else {
-                            val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
                             entryDao.pagingSourceByTagPrefix(
-                                exactTagPath = normalized,
+                                exactTagPath = exactTagPath,
                                 subtreeLikePattern = subtreeLike,
                             )
                         }
@@ -210,13 +245,14 @@ class DefaultEntryRepository @Inject constructor(
                 tagDao.getByIds(distinctTagIds)
             }
 
+            val tagAttachMs = System.currentTimeMillis()
             val entryTags = validTags.map { tag ->
                 EntryTagEntity(
                     entryId = entryId,
                     tagId = tag.id,
                     state = TagState.USER.name,
                     confidence = 1.0f,
-                    updatedAtMs = nowMs,
+                    updatedAtMs = tagAttachMs,
                 )
             }
 
@@ -554,13 +590,21 @@ class DefaultEntryRepository @Inject constructor(
             attachmentDao.getForEntry(entryId).isEmpty()
 
         when (filter) {
-            ChatFeedFilter.All -> {
+            is ChatFeedFilter.All -> {
                 if (entry.archivedAtMs != null) return@inReadTransaction null
                 if (!includeHiddenPlaceholders && isHidden) return@inReadTransaction null
+                if (filter.hideTodos && entry.taskStatus != TaskStatus.NONE.name) {
+                    return@inReadTransaction null
+                }
+                if (filter.untaggedOnly && entryDao.entryHasVisibleTag(entry.id)) {
+                    return@inReadTransaction null
+                }
                 entryDao.countAheadAll(
                     targetCreatedAtMs = entry.createdAtMs,
                     targetId = entry.id,
                     includeHidden = includeHiddenPlaceholders,
+                    untaggedOnly = filter.untaggedOnly,
+                    hideTodos = filter.hideTodos,
                 )
             }
 
@@ -580,48 +624,61 @@ class DefaultEntryRepository @Inject constructor(
                 if (priorityFilter != null && entry.taskPriority != priorityFilter) {
                     return@inReadTransaction null
                 }
-                when (filter.sortOrder) {
-                    TodoSortOrder.NEWEST -> entryDao.countAheadTodosByNewest(
-                        statuses = statuses,
-                        priorityFilter = priorityFilter,
-                        targetCreatedAtMs = entry.createdAtMs,
-                        targetId = entry.id,
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.tagFullPath)
+                if (exactTagPath != null && subtreeLike != null) {
+                    val matches = entryDao.entryMatchesTagPrefix(
+                        entryId = entry.id,
+                        exactTagPath = exactTagPath,
+                        subtreeLikePattern = subtreeLike,
                     )
-
-                    TodoSortOrder.PRIORITY -> {
-                        val rank = runCatching { TaskPriority.valueOf(entry.taskPriority) }
-                            .getOrDefault(TaskPriority.NONE)
-                            .sortRank
-                        entryDao.countAheadTodosByPriority(
-                            statuses = statuses,
-                            priorityFilter = priorityFilter,
-                            targetPriorityRank = rank,
-                            targetCreatedAtMs = entry.createdAtMs,
-                            targetId = entry.id,
-                        )
-                    }
+                    if (!matches) return@inReadTransaction null
                 }
+                countAheadTodos(
+                    entry = entry,
+                    statuses = statuses,
+                    priorityFilter = priorityFilter,
+                    sortOrder = filter.sortOrder,
+                    exactTagPath = exactTagPath,
+                    subtreeLikePattern = subtreeLike,
+                )
             }
 
             is ChatFeedFilter.TagSubtree -> {
                 if (entry.archivedAtMs != null || isHidden) return@inReadTransaction null
-                val normalized = TagPathNormalizer.normalize(filter.fullPath)
-                if (normalized.isEmpty()) {
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.effectiveFullPath)
+                if (exactTagPath != null && subtreeLike != null) {
+                    val matches = entryDao.entryMatchesTagPrefix(
+                        entryId = entry.id,
+                        exactTagPath = exactTagPath,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                    if (!matches) return@inReadTransaction null
+                }
+                val todoMode = filter.todoFilterMode
+                if (todoMode != null) {
+                    val statuses = todoStatusesForMode(todoMode)
+                    if (entry.taskStatus !in statuses) return@inReadTransaction null
+                    val priorityFilter = filter.priorityFilter?.name
+                    if (priorityFilter != null && entry.taskPriority != priorityFilter) {
+                        return@inReadTransaction null
+                    }
+                    countAheadTodos(
+                        entry = entry,
+                        statuses = statuses,
+                        priorityFilter = priorityFilter,
+                        sortOrder = filter.todoSortOrder,
+                        exactTagPath = exactTagPath,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                } else if (exactTagPath == null || subtreeLike == null) {
                     entryDao.countAheadAll(
                         targetCreatedAtMs = entry.createdAtMs,
                         targetId = entry.id,
                         includeHidden = false,
                     )
                 } else {
-                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
-                    val matches = entryDao.entryMatchesTagPrefix(
-                        entryId = entry.id,
-                        exactTagPath = normalized,
-                        subtreeLikePattern = subtreeLike,
-                    )
-                    if (!matches) return@inReadTransaction null
                     entryDao.countAheadTagPrefix(
-                        exactTagPath = normalized,
+                        exactTagPath = exactTagPath,
                         subtreeLikePattern = subtreeLike,
                         targetCreatedAtMs = entry.createdAtMs,
                         targetId = entry.id,
@@ -637,33 +694,48 @@ class DefaultEntryRepository @Inject constructor(
         includeHiddenPlaceholders: Boolean,
     ): Int? = database.inReadTransaction {
         val target = when (filter) {
-            ChatFeedFilter.All -> entryDao.getNewestEntryForDateOnOrBeforeAll(
+            is ChatFeedFilter.All -> entryDao.getNewestEntryForDateOnOrBeforeAll(
                 localDate = localDate,
                 includeHidden = includeHiddenPlaceholders,
+                untaggedOnly = filter.untaggedOnly,
+                hideTodos = filter.hideTodos,
             )
 
             ChatFeedFilter.Archived -> entryDao.getNewestEntryForDateOnOrBeforeArchived(
                 localDate = localDate,
             )
 
-            is ChatFeedFilter.Todos -> entryDao.getNewestEntryForDateOnOrBeforeTodos(
-                localDate = localDate,
-                statuses = todoStatusesForMode(filter.mode),
-                priorityFilter = filter.priorityFilter?.name,
-            )
+            is ChatFeedFilter.Todos -> {
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.tagFullPath)
+                entryDao.getNewestEntryForDateOnOrBeforeTodos(
+                    localDate = localDate,
+                    statuses = todoStatusesForMode(filter.mode),
+                    priorityFilter = filter.priorityFilter?.name,
+                    exactTagPath = exactTagPath,
+                    subtreeLikePattern = subtreeLike,
+                )
+            }
 
             is ChatFeedFilter.TagSubtree -> {
-                val normalized = TagPathNormalizer.normalize(filter.fullPath)
-                if (normalized.isEmpty()) {
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.effectiveFullPath)
+                val todoMode = filter.todoFilterMode
+                if (todoMode != null) {
+                    entryDao.getNewestEntryForDateOnOrBeforeTodos(
+                        localDate = localDate,
+                        statuses = todoStatusesForMode(todoMode),
+                        priorityFilter = filter.priorityFilter?.name,
+                        exactTagPath = exactTagPath,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                } else if (exactTagPath == null || subtreeLike == null) {
                     entryDao.getNewestEntryForDateOnOrBeforeAll(
                         localDate = localDate,
                         includeHidden = false,
                     )
                 } else {
-                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
                     entryDao.getNewestEntryForDateOnOrBeforeTagPrefix(
                         localDate = localDate,
-                        exactTagPath = normalized,
+                        exactTagPath = exactTagPath,
                         subtreeLikePattern = subtreeLike,
                     )
                 }
@@ -682,23 +754,39 @@ class DefaultEntryRepository @Inject constructor(
         includeHiddenPlaceholders: Boolean,
     ): Flow<List<TimelineDateBucket>> {
         val sourceFlow = when (filter) {
-            ChatFeedFilter.All -> entryDao.observeTimelineDateBucketsAll(includeHidden = includeHiddenPlaceholders)
+            is ChatFeedFilter.All -> entryDao.observeTimelineDateBucketsAll(
+                includeHidden = includeHiddenPlaceholders,
+                untaggedOnly = filter.untaggedOnly,
+                hideTodos = filter.hideTodos,
+            )
 
             ChatFeedFilter.Archived -> entryDao.observeTimelineDateBucketsArchived()
 
-            is ChatFeedFilter.Todos -> entryDao.observeTimelineDateBucketsTodos(
-                statuses = todoStatusesForMode(filter.mode),
-                priorityFilter = filter.priorityFilter?.name,
-            )
+            is ChatFeedFilter.Todos -> {
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.tagFullPath)
+                entryDao.observeTimelineDateBucketsTodos(
+                    statuses = todoStatusesForMode(filter.mode),
+                    priorityFilter = filter.priorityFilter?.name,
+                    exactTagPath = exactTagPath,
+                    subtreeLikePattern = subtreeLike,
+                )
+            }
 
             is ChatFeedFilter.TagSubtree -> {
-                val normalized = TagPathNormalizer.normalize(filter.fullPath)
-                if (normalized.isEmpty()) {
+                val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(filter.effectiveFullPath)
+                val todoMode = filter.todoFilterMode
+                if (todoMode != null) {
+                    entryDao.observeTimelineDateBucketsTodos(
+                        statuses = todoStatusesForMode(todoMode),
+                        priorityFilter = filter.priorityFilter?.name,
+                        exactTagPath = exactTagPath,
+                        subtreeLikePattern = subtreeLike,
+                    )
+                } else if (exactTagPath == null || subtreeLike == null) {
                     entryDao.observeTimelineDateBucketsAll(includeHidden = false)
                 } else {
-                    val subtreeLike = "${TagPathNormalizer.escapeLike(normalized)}/%"
                     entryDao.observeTimelineDateBucketsTagPrefix(
-                        exactTagPath = normalized,
+                        exactTagPath = exactTagPath,
                         subtreeLikePattern = subtreeLike,
                     )
                 }
@@ -707,6 +795,62 @@ class DefaultEntryRepository @Inject constructor(
         return sourceFlow
             .map { rows -> rows.map { TimelineDateBucket(localDate = it.localDate, entryCount = it.entryCount) } }
             .distinctUntilChanged()
+    }
+
+    override fun observeTodoCounts(tagFullPath: String?): Flow<TodoCounts> {
+        val (exactTagPath, subtreeLike) = normalizeTagPrefixFilter(tagFullPath)
+        return entryDao.observeTodoCounts(
+            exactTagPath = exactTagPath,
+            subtreeLikePattern = subtreeLike,
+        )
+            .map { projection ->
+                TodoCounts(
+                    openCount = projection.openCount,
+                    completedCount = projection.completedCount,
+                )
+            }
+            .distinctUntilChanged()
+    }
+
+    private suspend fun countAheadTodos(
+        entry: EntryEntity,
+        statuses: List<String>,
+        priorityFilter: String?,
+        sortOrder: TodoSortOrder,
+        exactTagPath: String?,
+        subtreeLikePattern: String?,
+    ): Int = when (sortOrder) {
+        TodoSortOrder.NEWEST -> entryDao.countAheadTodosByNewest(
+            statuses = statuses,
+            priorityFilter = priorityFilter,
+            targetCreatedAtMs = entry.createdAtMs,
+            targetId = entry.id,
+            exactTagPath = exactTagPath,
+            subtreeLikePattern = subtreeLikePattern,
+        )
+
+        TodoSortOrder.PRIORITY -> {
+            val rank = runCatching { TaskPriority.valueOf(entry.taskPriority) }
+                .getOrDefault(TaskPriority.NONE)
+                .sortRank
+            entryDao.countAheadTodosByPriority(
+                statuses = statuses,
+                priorityFilter = priorityFilter,
+                targetPriorityRank = rank,
+                targetCreatedAtMs = entry.createdAtMs,
+                targetId = entry.id,
+                exactTagPath = exactTagPath,
+                subtreeLikePattern = subtreeLikePattern,
+            )
+        }
+    }
+
+    private fun normalizeTagPrefixFilter(rawPath: String?): Pair<String?, String?> {
+        val normalized = rawPath
+            ?.let { TagPathNormalizer.normalize(it) }
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null to null
+        return normalized to "${TagPathNormalizer.escapeLike(normalized)}/%"
     }
 
     private suspend fun resolveOrCreateInlineTags(

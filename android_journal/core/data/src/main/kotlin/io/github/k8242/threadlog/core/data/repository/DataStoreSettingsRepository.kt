@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.k8242.threadlog.core.model.AppColorScheme
 import io.github.k8242.threadlog.core.model.BackupCadence
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.UserSettings
 import io.github.k8242.threadlog.core.model.WeekStart
@@ -80,6 +81,12 @@ class DataStoreSettingsRepository @Inject constructor(
         }
     }
 
+    override suspend fun setTagSortOrder(sortOrder: TagSortOrder) {
+        dataStore.edit { prefs ->
+            prefs[KEY_TAG_SORT_ORDER] = sortOrder.name
+        }
+    }
+
     override suspend fun updateSyncLinks(
         spreadsheetId: String?,
         mediaFolderId: String?,
@@ -129,6 +136,9 @@ class DataStoreSettingsRepository @Inject constructor(
         val themeMode = this[KEY_THEME_MODE]
             ?.let { raw -> runCatching { ThemeMode.valueOf(raw) }.getOrNull() }
             ?: ThemeMode.SYSTEM
+        val tagSortOrder = this[KEY_TAG_SORT_ORDER]
+            ?.let { raw -> runCatching { TagSortOrder.valueOf(raw) }.getOrNull() }
+            ?: TagSortOrder.RECENT
 
         return UserSettings(
             weekStart = weekStart,
@@ -142,6 +152,7 @@ class DataStoreSettingsRepository @Inject constructor(
             deviceId = this[KEY_DEVICE_ID].orEmpty(),
             colorScheme = colorScheme,
             themeMode = themeMode,
+            tagSortOrder = tagSortOrder,
         )
     }
 
@@ -159,5 +170,6 @@ class DataStoreSettingsRepository @Inject constructor(
         private val KEY_DEVICE_ID = stringPreferencesKey("device_id")
         private val KEY_COLOR_SCHEME = stringPreferencesKey("color_scheme")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_TAG_SORT_ORDER = stringPreferencesKey("tag_sort_order")
     }
 }

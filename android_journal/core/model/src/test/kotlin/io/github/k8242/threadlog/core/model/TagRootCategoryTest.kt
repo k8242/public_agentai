@@ -66,4 +66,44 @@ class TagRootCategoryTest {
         assertThat(TagRootCategory.fromPath("/")).isEqualTo(TagRootCategory.OTHER)
         assertThat(TagRootCategory.fromPath("///")).isEqualTo(TagRootCategory.OTHER)
     }
+
+    @Test
+    fun tagColorPreset_fromToken_resolvesCustomPresetsAndReturnsNullForLegacyAndDefault() {
+        assertThat(TagColorPreset.entries).hasSize(11)
+        assertThat(TagColorPreset.fromToken("coral")).isEqualTo(TagColorPreset.CORAL)
+        assertThat(TagColorPreset.fromToken("  VIOLET ")).isEqualTo(TagColorPreset.VIOLET)
+        assertThat(TagColorPreset.fromToken("slate")).isEqualTo(TagColorPreset.SLATE)
+
+        for (preset in TagColorPreset.entries) {
+            if (preset == TagColorPreset.DEFAULT) {
+                assertThat(TagColorPreset.fromToken(preset.token)).isNull()
+            } else {
+                assertThat(TagColorPreset.fromToken(preset.token)).isEqualTo(preset)
+            }
+        }
+
+        // Legacy category tokens, default, blank, null, and unknown tokens fall back to null.
+        for (legacy in listOf(null, "", "   ", "default", "DEFAULT", "people", "topics", "projects", "auto", "other", "unknown")) {
+            assertThat(TagColorPreset.fromToken(legacy)).isNull()
+        }
+    }
+
+    @Test
+    fun tagSubtreeFilter_effectiveTagIdAndFullPath_preferSelectedSubTag() {
+        val parentOnly = ChatFeedFilter.TagSubtree(
+            tagId = "t-parent",
+            fullPath = "projects/threadlog",
+            displayLabel = "threadlog",
+        )
+        assertThat(parentOnly.effectiveTagId).isEqualTo("t-parent")
+        assertThat(parentOnly.effectiveFullPath).isEqualTo("projects/threadlog")
+
+        val withSubTag = parentOnly.copy(
+            selectedSubTagId = "t-bugs",
+            selectedSubTagPath = "projects/threadlog/bugs",
+        )
+        assertThat(withSubTag.effectiveTagId).isEqualTo("t-bugs")
+        assertThat(withSubTag.effectiveFullPath).isEqualTo("projects/threadlog/bugs")
+    }
 }
+

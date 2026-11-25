@@ -64,6 +64,7 @@ class SettingsAndBackupGatewayTest {
         assertThat(initial.offlineOnlyLinks).isFalse()
         assertThat(initial.showHiddenAutoTagsInChat).isFalse()
         assertThat(initial.scheduledBackupCadence).isEqualTo(BackupCadence.OFF)
+        assertThat(initial.tagSortOrder).isEqualTo(io.github.k8242.threadlog.core.model.TagSortOrder.RECENT)
 
         repo1.settings.test {
             val first = awaitItem()
@@ -92,6 +93,10 @@ class SettingsAndBackupGatewayTest {
             assertThat(awaitItem().themeMode)
                 .isEqualTo(io.github.k8242.threadlog.core.model.ThemeMode.DARK)
 
+            repo1.setTagSortOrder(io.github.k8242.threadlog.core.model.TagSortOrder.MOST_USED)
+            assertThat(awaitItem().tagSortOrder)
+                .isEqualTo(io.github.k8242.threadlog.core.model.TagSortOrder.MOST_USED)
+
             repo1.updateSyncLinks(
                 spreadsheetId = "sheet-123",
                 mediaFolderId = "folder-456",
@@ -114,6 +119,8 @@ class SettingsAndBackupGatewayTest {
             .isEqualTo(io.github.k8242.threadlog.core.model.AppColorScheme.WHATSAPP)
         assertThat(secondRead.themeMode)
             .isEqualTo(io.github.k8242.threadlog.core.model.ThemeMode.DARK)
+        assertThat(secondRead.tagSortOrder)
+            .isEqualTo(io.github.k8242.threadlog.core.model.TagSortOrder.MOST_USED)
 
         // Clearing nullable sync links persists nulls properly.
         repo1.updateSyncLinks(spreadsheetId = null, mediaFolderId = null, lastExportIso = null)
@@ -429,4 +436,69 @@ class SettingsAndBackupGatewayTest {
         val droidHits = graph.searchRepository.search("droid", nowMs = nowMs).tierARecent
         assertThat(droidHits.map { it.entryId }).containsExactly(newImported.entry.id)
     }
+
+    @Test
+    fun backupGateway_applyMergeRestore_restoresCustomTagColorTokenAndKeepsDefaultWhenBlank() = runTest {
+        val existingTag = graph.tagRepository.createOrGetTagByPath("projects/alpha")
+        graph.tagRepository.updateTagColor(existingTag.id, "teal")
+
+        val remoteWorkbook = BackupWorkbook(
+            entries = emptyList(),
+            tags = listOf(
+                SheetTagRow(
+                    tagId = "tag-custom-color",
+                    fullPath = "topics/design",
+                    leafName = "design",
+                    rootCategory = "TOPICS",
+                    colorToken = "CORAL",
+                    aliases = emptyList(),
+                ),
+                SheetTagRow(
+                    tagId = existingTag.id,
+                    fullPath = "projects/alpha",
+                    leafName = "alpha",
+                    rootCategory = "PROJECTS",
+                    colorToken = "", // Blank token must NOT wipe existing custom color
+                    aliases = emptyList(),
+                ),
+                SheetTagRow(
+                    tagId = "tag-overwrite-color",
+                    fullPath = "people/lex",
+                    leafName = "lex",
+                    rootCategory = "PEOPLE",
+                    colorToken = "indigo",
+                    aliases = emptyList(),
+                ),
+            ),
+            meta = SyncMetaRecord(
+                lastExportIso = "2026-11-20T16:00:00Z",
+                deviceId = "remote-device",
+                entryCount = 0,
+                checksum = "checksum-colors",
+            ),
+        )
+
+        val diff = SyncDiffPreview(
+            sourceFormat = BackupFormat.CSV,
+            newItems = emptyList(),
+            editedItems = emptyList(),
+            deletedItems = emptyList(),
+            conflicts = emptyList(),
+            tagChangesCount = 3,
+            missingMediaIds = emptyList(),
+            remoteWorkbook = remoteWorkbook,
+        )
+
+        graph.backupDataGateway.applyMergeRestore(
+            diff = diff,
+            resolutions = emptyMap(),
+            downloadedMedia = emptyMap(),
+        )
+
+        val tagsByPath = graph.tagRepository.getAllTags().associateBy { it.fullPath }
+        assertThat(tagsByPath.getValue("topics/design").colorToken).isEqualTo("coral")
+        assertThat(tagsByPath.getValue("projects/alpha").colorToken).isEqualTo("teal")
+        assertThat(tagsByPath.getValue("people/lex").colorToken).isEqualTo("indigo")
+    }
 }
+

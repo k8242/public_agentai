@@ -12,6 +12,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.BrightnessAuto
@@ -51,6 +54,7 @@ import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.Visibility
@@ -58,6 +62,8 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -77,6 +83,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,7 +92,10 @@ import io.github.k8242.threadlog.app.ui.theme.AvailableColorSchemes
 import io.github.k8242.threadlog.core.model.AppColorScheme
 import io.github.k8242.threadlog.core.model.ChatFeedFilter
 import io.github.k8242.threadlog.core.model.DrawerTagSummary
+import io.github.k8242.threadlog.core.model.Tag
+import io.github.k8242.threadlog.core.model.TagColorPreset
 import io.github.k8242.threadlog.core.model.TagRootCategory
+import io.github.k8242.threadlog.core.model.TagSortOrder
 import io.github.k8242.threadlog.core.model.ThemeMode
 import io.github.k8242.threadlog.core.model.navigation.ThreadLogRoute
 
@@ -120,8 +130,12 @@ fun ThreadLogDrawerSheet(
     onSelectColorScheme: (AppColorScheme) -> Unit,
     onCycleThemeMode: () -> Unit,
     onDeleteTag: (DrawerTagSummary) -> Unit = {},
+    onSelectTagSortOrder: (TagSortOrder) -> Unit = {},
+    onUpdateTagColor: (tagId: String, colorToken: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    var optionsSummary by remember { mutableStateOf<DrawerTagSummary?>(null) }
     var pendingDeleteSummary by remember { mutableStateOf<DrawerTagSummary?>(null) }
 
     ModalDrawerSheet(
@@ -259,6 +273,82 @@ fun ThreadLogDrawerSheet(
                 }
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { sortMenuExpanded = true },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.SwapVert,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Text(
+                                text = "Sort: ${uiState.tagSortOrder.label}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Icon(
+                                imageVector = Icons.Outlined.ArrowDropDown,
+                                contentDescription = "Change tag sort order",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = sortMenuExpanded,
+                        onDismissRequest = { sortMenuExpanded = false },
+                    ) {
+                        TagSortOrder.entries.forEach { order ->
+                            val isSelected = uiState.tagSortOrder == order
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = order.label,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Check,
+                                            contentDescription = "${order.label} selected",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                onClick = {
+                                    sortMenuExpanded = false
+                                    onSelectTagSortOrder(order)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(4.dp))
 
             // 4. Scrollable Topics, TODOs, People & Tags list
@@ -270,7 +360,7 @@ fun ThreadLogDrawerSheet(
             ) {
                 // Pinned: All Notes
                 item(key = "pinned_all_notes") {
-                    val selected = isChatActive && activeChatFilter == ChatFeedFilter.All
+                    val selected = isChatActive && activeChatFilter is ChatFeedFilter.All
                     DrawerConversationRow(
                         title = "All Notes",
                         subtitle = uiState.overview.latestEntryPreview ?: "Your complete journal stream",
@@ -281,7 +371,7 @@ fun ThreadLogDrawerSheet(
                         avatarFg = MaterialTheme.colorScheme.onPrimaryContainer,
                         avatarIcon = Icons.AutoMirrored.Outlined.Chat,
                         avatarText = null,
-                        onClick = { onSelectChatFilter(ChatFeedFilter.All) },
+                        onClick = { onSelectChatFilter(ChatFeedFilter.All()) },
                     )
                 }
 
@@ -400,7 +490,7 @@ fun ThreadLogDrawerSheet(
                         val selected = isChatActive &&
                             activeChatFilter is ChatFeedFilter.TagSubtree &&
                             activeChatFilter.tagId == summary.tag.id
-                        val (avatarBg, avatarFg) = drawerTagAvatarColors(summary.tag.rootCategory)
+                        val (avatarBg, avatarFg) = drawerTagAvatarColors(summary.tag)
                         val subtitle = summary.latestPreview ?: summary.tag.fullPath
 
                         DrawerConversationRow(
@@ -423,7 +513,7 @@ fun ThreadLogDrawerSheet(
                                     ),
                                 )
                             },
-                            onLongClick = { pendingDeleteSummary = summary },
+                            onLongClick = { optionsSummary = summary },
                             onDeleteClick = { pendingDeleteSummary = summary },
                         )
                     }
@@ -440,6 +530,30 @@ fun ThreadLogDrawerSheet(
                 onCycleThemeMode = onCycleThemeMode,
             )
         }
+    }
+
+    optionsSummary?.let { selected ->
+        val target = uiState.allTagSummaries.firstOrNull { it.tag.id == selected.tag.id } ?: selected
+        val displayLabel = uiState.tagDisplayLabels[target.tag.id] ?: target.tag.leafName
+        val prefix = when (target.tag.rootCategory) {
+            TagRootCategory.PEOPLE -> "@"
+            TagRootCategory.PROJECTS -> "+"
+            else -> "#"
+        }
+        TagOptionsColorDialog(
+            title = "$prefix$displayLabel",
+            fullPath = target.tag.fullPath,
+            activeColorToken = target.tag.colorToken,
+            onSelectColor = { token ->
+                onUpdateTagColor(target.tag.id, token)
+                optionsSummary = null
+            },
+            onRequestDelete = {
+                optionsSummary = null
+                pendingDeleteSummary = target
+            },
+            onDismiss = { optionsSummary = null },
+        )
     }
 
     pendingDeleteSummary?.let { target ->
@@ -794,6 +908,135 @@ private fun DrawerThemeFooter(
             )
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagOptionsColorDialog(
+    title: String,
+    fullPath: String,
+    activeColorToken: String,
+    onSelectColor: (String) -> Unit,
+    onRequestDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val activePreset = TagColorPreset.fromToken(activeColorToken) ?: TagColorPreset.DEFAULT
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = fullPath,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Tag color",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    TagColorPreset.entries.forEach { preset ->
+                        val isSelected = activePreset == preset
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier
+                                .width(48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSelectColor(preset.token) }
+                                .padding(vertical = 2.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(preset.swatchArgb))
+                                    .then(
+                                        if (isSelected) {
+                                            Modifier.border(
+                                                width = 2.dp,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                shape = CircleShape,
+                                            )
+                                        } else {
+                                            Modifier.border(
+                                                BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                                                CircleShape,
+                                            )
+                                        },
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = "${preset.label} selected",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onRequestDelete) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Delete tag", color = MaterialTheme.colorScheme.error)
+            }
+        },
+    )
+}
+
+@Composable
+private fun drawerTagAvatarColors(tag: Tag): Pair<Color, Color> {
+    val preset = TagColorPreset.fromToken(tag.colorToken)
+    if (preset != null) {
+        val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+        return if (isDark) {
+            Color(preset.darkContainerArgb) to Color(preset.darkOnContainerArgb)
+        } else {
+            Color(preset.lightContainerArgb) to Color(preset.lightOnContainerArgb)
+        }
+    }
+    return drawerTagAvatarColors(tag.rootCategory)
 }
 
 @Composable
