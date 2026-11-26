@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ThreadLog System & Architecture Glossary</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Custom scrollbar styling for compact embed */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--card-border, #cbd5e1);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-0 m-0 text-sm">
+  <div class="py-2 space-y-3">
+    <!-- Header Controls -->
+    <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between pb-2 border-b border-[var(--card-border)]">
+      <div class="relative flex-1">
+        <input 
+          id="glossary-search" 
+          type="text" 
+          placeholder="Filter glossary by term, syntax, or keyword..." 
+          class="w-full px-3 py-1.5 text-xs rounded-lg bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] placeholder-[var(--placeholder)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+        />
+        <button id="clear-search" class="hidden absolute right-2.5 top-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]">✕</button>
+      </div>
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0" id="category-bar">
+        <button data-cat="ALL" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--primary)] text-[var(--primary-foreground)]">All (<span id="count-all">0</span>)</button>
+        <button data-cat="FORMATTING" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]">Formatting (<span id="count-formatting">0</span>)</button>
+        <button data-cat="FEATURE" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]">Features (<span id="count-feature">0</span>)</button>
+        <button data-cat="ARCH" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]">Architecture (<span id="count-arch">0</span>)</button>
+        <button data-cat="BACKUP" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]">Data & Backup (<span id="count-backup">0</span>)</button>
+        <button data-cat="SECURITY" class="cat-pill px-2.5 py-1 text-xs rounded-full font-medium transition-colors bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]">Security (<span id="count-security">0</span>)</button>
+      </div>
+    </div>
+
+    <!-- Active Count & Status Strip -->
+    <div class="flex items-center justify-between text-xs text-[var(--muted-foreground)] px-1">
+      <span id="results-count">Showing all terms</span>
+      <span class="text-[10px] tracking-wide uppercase font-mono">ThreadLog v4.0</span>
+    </div>
+
+    <!-- Glossary Term Cards Container -->
+    <div id="glossary-list" class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[500px] overflow-y-auto pr-1">
+      <!-- Injected dynamically via JS -->
+    </div>
+  </div>
+
+  <script>
+    const GLOSSARY_DATA = [
+      // Formatting & Syntax
+      {
+        term: "*bold*",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "WhatsApp Syntax",
+        description: "Encloses text in asterisks to format as bold typography. Validated against WhatsApp boundary rules (cannot be preceded/followed by letters/digits, whitespace-clean).",
+        syntax: "*important note*",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "_italic_",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "WhatsApp Syntax",
+        description: "Encloses text in underscores for italicized text. Underscores embedded within URLs (e.g. query params) are safely ignored by the parser.",
+        syntax: "_subtle detail_",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "~strike~",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "WhatsApp Syntax",
+        description: "Encloses text in tildes for strikethrough styling, commonly used for completed thoughts or scratchpad entries.",
+        syntax: "~obsolete item~",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "`inline code`",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Code Token",
+        description: "Single backtick monospace spans rendered verbatim. Markers inside inline code spans are never evaluated as formatting delimiters.",
+        syntax: "`val id: String`",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "```code block```",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Block Token",
+        description: "Fenced triple-backtick block with optional language tag (e.g. ```kotlin ... ```). Rendered in a dedicated syntax card with background shading.",
+        syntax: "```kotlin\nfun log() {}\n```",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "> Quote Block",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Block Token",
+        description: "Leading chevron on consecutive lines renders a vertical accent border and indented blockquote styling with inline formatting support.",
+        syntax: "> Quoted thought from earlier",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "@person Tag Trigger",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Inline Trigger",
+        description: "Leading '@' invokes autocomplete scoped strictly to the `people/*` tag hierarchy. Upon sending, creates or links a person tag and strips prefix.",
+        syntax: "@Lex @Sarah",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "#topic Tag Trigger",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Inline Trigger",
+        description: "Leading '#' searches across all tag trees (`topics/*`, `projects/*`, `people/*`). Stripped from text on send and attached as a structured tag.",
+        syntax: "#health #ideas",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "+project Tag Trigger",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Inline Trigger",
+        description: "Leading '+' dedicated prefix that invokes autocomplete filtered directly to the `projects/*` tree. Arithmetic expressions (e.g. 2+2) are ignored.",
+        syntax: "+apollo +threadlog",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Escaped Tags (\\@, \\#, \\+)",
+        category: "FORMATTING",
+        module: ":core:parser",
+        badge: "Syntax Escape",
+        description: "Backslash prefixes allow literal usage of '@', '#', or '+' in message text without creating structured tags or triggering autocomplete.",
+        syntax: "\\@handle \\#123 \\+1",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Yellow Highlighting",
+        category: "FORMATTING",
+        module: ":core:model",
+        badge: "Visual Tint",
+        description: "Visual emphasis flag (`isHighlighted: true`) rendering a warm soft yellow tint (#FFF8D6 in Light / #3D3518 in Dark) across Chat, Weekly, and Calendar.",
+        syntax: "Message Menu → Highlight",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Hex-Ordinal Timestamp",
+        category: "FORMATTING",
+        module: ":feature:chat",
+        badge: "Monospace Header",
+        description: "Chronological per-day 0-based hexadecimal counter (0x0, 0x1, ..., 0xF, 0x10) displayed in the bubble top-left header alongside the write-time clock.",
+        syntax: "0x0 · 8:15 AM",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "URL Domain Chips & Title Fetcher",
+        category: "FORMATTING",
+        module: ":core:parser & :feature:chat",
+        badge: "Link Preview",
+        description: "Automatically extracts URLs into collapsible domain chips with async background <title> extraction via WorkManager (honors offline-only toggle).",
+        syntax: "https://example.com",
+        status: "IMPLEMENTED"
+      },
+
+      // Core Features & UX
+      {
+        term: "Chat-Stream Feed",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Core UI",
+        description: "Reverse-anchored Paging 3 timeline with 4-tier hierarchical date dividers (Year / Month / Week / Day), sticky period pill, and 80% bubble width.",
+        syntax: "Chat Tab",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "TODO Tasks & DONE Toggles",
+        category: "FEATURE",
+        module: ":core:model & :feature:chat",
+        badge: "Task Management",
+        description: "Transform any note into an actionable task (TaskStatus: NONE, TODO, DONE) with 1-tap inline checkboxes, strikethrough styling, and dedicated TODO views.",
+        syntax: "Task Checkbox / Menu",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Task Priorities",
+        category: "FEATURE",
+        module: ":core:model & :feature:chat",
+        badge: "Prioritization",
+        description: "4 priority levels (HIGH: Orange #EF6C00, MEDIUM: Dark Blue #1565C0, LOW: Light Blue #29B6F6, NONE: Gray) with color trim, sorting, and filter chips.",
+        syntax: "Priority Selector",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Multi-Select & Batch Actions",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Batch Operations",
+        description: "Select multiple notes to perform chronological bulk copy, multi-entry tag assignments, batch TODO status/priority changes, highlight, archive, or deletion.",
+        syntax: "Menu → Select",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Sub-Tag Navigation Tabs",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Taxonomy UI",
+        description: "Hierarchical sub-tags automatically generate secondary scrollable tabs under parent tag views (e.g. #travel -> [All, #japan, #france]) with multi-level nesting.",
+        syntax: "Tag View Header",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Bidirectional TODO ↔ Tag Filtering",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Cross-Filtering",
+        description: "Cross-filter tasks by tag in the TODOs view (Tag: #apollo), or filter any tag view by TODO status (Open / Done / All) with unified SQLite queries.",
+        syntax: "Filter Strip",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Timeline Scrubber & Jump Controls",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Navigation",
+        description: "Google Photos-style right-edge timeline scrollbar with floating date pill during drag, Jump-to-Beginning header icon, and Jump-to-End floating action button.",
+        syntax: "Edge Scrubber",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Composer Backdating",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Historical Entry",
+        description: "Explicit Date / Time / IANA Timezone picker dialog with optional 'Keep date (+1 min each)' toggle for historical catch-up journaling.",
+        syntax: "Composer Clock Icon",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "WhatsApp Chat Importer",
+        category: "FEATURE",
+        module: ":core:parser & :feature:backup",
+        badge: "Data Import",
+        description: "Imports Android/iOS WhatsApp chat export text or .txt files with interactive review, timezone selection, sender stripping, and duplicate detection.",
+        syntax: "Backup Screen → Import",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Two-Tier Hybrid Search",
+        category: "FEATURE",
+        module: ":feature:search",
+        badge: "FTS5 Search",
+        description: "Tier A (<= 5 weeks) feeds an in-feed stepper jumping directly to chat bubbles; Tier B (> 5 weeks) returns compact cards with an interactive ±12h context window.",
+        syntax: "Search Tab",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Compact Weekly & Calendar Views",
+        category: "FEATURE",
+        module: ":feature:views",
+        badge: "Alternative Views",
+        description: "Compact Weekly 1-line truncated summaries with inline expansion, and monthly Calendar grid with activity density dots, TODO counts, and subtree filters.",
+        syntax: "Weekly / Calendar Tabs",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Emoji Reactions",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Reactions",
+        description: "WhatsApp-style emoji reaction picker (👍 ❤️ 😂 😮 😢 🙏 🔥 ⭐ ✅ 🎯 💡 📌 + custom) with bubble pills that preserve original updatedAtMs timestamps.",
+        syntax: "Long-Press Bubble",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Hidable Left Drawer & Theme Hub",
+        category: "FEATURE",
+        module: ":app",
+        badge: "Navigation",
+        description: "Modal navigation drawer with tag/people/topic tree summaries, unread auto-tag badge, and quick theme switcher (7 curated palettes + Light/Dark/System).",
+        syntax: "Top-Left Hamburger",
+        status: "IMPLEMENTED"
+      },
+
+      // Architecture & Data
+      {
+        term: "UUID v7",
+        category: "ARCH",
+        module: ":core:parser",
+        badge: "Identifier",
+        description: "Time-ordered 128-bit UUID format ensuring database B-tree index locality and deterministic chronological sorting across distributed imports.",
+        syntax: "UUIDv7.generate()",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "IANA Timezone Anchoring",
+        category: "ARCH",
+        module: ":core:model",
+        badge: "Temporal Integrity",
+        description: "Captures the user's exact IANA time zone (e.g. 'America/Los_Angeles') at write time, preserving local calendar date boundaries even when traveling.",
+        syntax: "zoneId: String",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Content Hash (SHA-256)",
+        category: "ARCH",
+        module: ":core:parser",
+        badge: "Sync Diffing",
+        description: "Deterministic SHA-256 digest computed across normalized body, tags, task status, priority, and reactions to power fast 3-way conflict detection.",
+        syntax: "contentHash: String",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "BundledSQLiteDriver & FTS5",
+        category: "ARCH",
+        module: ":core:data",
+        badge: "Database",
+        description: "Room 2.8.5 bundled SQLite driver bypassing device SQLite fragmentation, delivering guaranteed Unicode FTS5 tokenization across all Android API levels.",
+        syntax: "Room SQLite FTS5",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Zero Feature-to-Feature Coupling",
+        category: "ARCH",
+        module: "Gradle Modules",
+        badge: "Modularity",
+        description: "Clean architecture design principle where 5 feature modules depend only on :core:* libraries, never directly on one another.",
+        syntax: "10 Gradle Modules",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Paging 3 Fixed Placeholders",
+        category: "ARCH",
+        module: ":core:data & :feature:chat",
+        badge: "Scroll Stability",
+        description: "PagingConfig with enablePlaceholders=true and 72dp placeholder slots, completely eliminating scroll-drift jumps when toggling status in historical notes.",
+        syntax: "PagingSource<Int, Entry>",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "LeafDisambiguator",
+        category: "ARCH",
+        module: ":core:parser",
+        badge: "Tag Hierarchy",
+        description: "Renders multi-root tags leaf-only ('Lex') while automatically computing minimal-parent disambiguation (e.g. 'Alex (work)' vs 'Alex (school)') on collisions.",
+        syntax: "DefaultLeafDisambiguator",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Atomic FileMediaStorage",
+        category: "ARCH",
+        module: ":core:media",
+        badge: "Storage Engine",
+        description: "Thread-safe disk storage engine that writes incoming media to a temporary file, calls fsync, and performs an atomic rename to content-addressed UUID files.",
+        syntax: "FileMediaStorage",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "WorkManager Workers",
+        category: "ARCH",
+        module: ":feature:autotag, :feature:chat, :feature:backup",
+        badge: "Background Jobs",
+        description: "Manages asynchronous operations via AutoTagWorker, BookmarkTitleWorker, and ScheduledBackupWorker with battery/network constraints.",
+        syntax: "@HiltWorker",
+        status: "IMPLEMENTED"
+      },
+
+      // Data & Backup
+      {
+        term: "3-Tab Google Sheets Sync",
+        category: "BACKUP",
+        module: ":feature:backup",
+        badge: "Cloud Storage",
+        description: "Two-way human-readable sync workbook with 3 tabs: 'Entries', 'TagTree', and 'SyncMeta', maintaining complete journal state in standard spreadsheets.",
+        syntax: "Google Sheets v4 API",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "ThreadLog_Media/ Drive Sync",
+        category: "BACKUP",
+        module: ":feature:backup",
+        badge: "Cloud Media",
+        description: "Dedicated Google Drive companion folder storing binary images using the minimal, non-restricted drive.file OAuth 2.0 permission scope.",
+        syntax: "Google Drive v3 API",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "3-Way Dry-Run Diff Engine",
+        category: "BACKUP",
+        module: ":feature:backup",
+        badge: "Conflict Engine",
+        description: "Compares Local vs Remote vs Base snapshots using content hashes, presenting an interactive preview with per-conflict resolution before writing.",
+        syntax: "SyncDiffEngine",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Offline SAF Codecs (CSV / XLSX / ZIP)",
+        category: "BACKUP",
+        module: ":feature:backup",
+        badge: "Offline Export",
+        description: "Zero-cloud export and restore engine utilizing Android Storage Access Framework (SAF) for CSV, Excel (.xlsx), and JSON + Media (.zip) packages.",
+        syntax: "Android SAF",
+        status: "IMPLEMENTED"
+      },
+
+      // Security & Safeguards
+      {
+        term: "SensitiveCredentialGuard",
+        category: "SECURITY",
+        module: ":core:parser",
+        badge: "Data Protection",
+        description: "Deterministic keyword and syntax engine blocking accidental entry of real passwords, passcodes, and PINs across both note creation and editing.",
+        syntax: "SensitiveCredentialGuard",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "xxxx Masking Exception",
+        category: "SECURITY",
+        module: ":core:parser & :feature:chat",
+        badge: "Credential Safety",
+        description: "Permits placeholder values of 4+ 'x's (e.g. 'pw: xxxx', 'PIN: XXXX'). Provides 1-tap 'Mask xxxx' banner action in composer when violations occur.",
+        syntax: "pw: xxxx",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "drive.file Scope Guard",
+        category: "SECURITY",
+        module: ":feature:backup",
+        badge: "Minimal Privilege",
+        description: "Restricts cloud OAuth access strictly to files created by ThreadLog itself, preventing access to the user's personal Google Drive contents.",
+        syntax: "https://.../auth/drive.file",
+        status: "IMPLEMENTED"
+      },
+      {
+        term: "Public Repository Protection",
+        category: "SECURITY",
+        module: "Build / Repository",
+        badge: "DevOps Hygiene",
+        description: "Gitignore rules preventing local.properties, keystores, or OAuth credentials from ever being committed to the public open-source repository.",
+        syntax: "local.properties",
+        status: "IMPLEMENTED"
+      },
+
+      // Architectural Hooks & Pending Elements
+      {
+        term: "AutoTagProvider SPI (ML / On-Device LLM)",
+        category: "ARCH",
+        module: ":core:model & :feature:autotag",
+        badge: "Extensibility SPI",
+        description: "Current implementation uses deterministic OfflineRuleAutoTagger. The pluggable AutoTagProvider interface is architected to allow future on-device ML/LLM auto-taggers.",
+        syntax: "interface AutoTagProvider",
+        status: "PENDING_EXT"
+      },
+      {
+        term: "OAuth Cloud Client Provisioning",
+        category: "BACKUP",
+        module: ":feature:backup",
+        badge: "Configuration",
+        description: "Cloud sync code is fully built, but requires user-supplied GOOGLE_WEB_CLIENT_ID in local.properties due to open-source credential safety. Offline SAF export works out of the box.",
+        syntax: "GOOGLE_WEB_CLIENT_ID",
+        status: "PENDING_CONFIG"
+      },
+      {
+        term: "OpenGraph Rich Link Scraper",
+        category: "FEATURE",
+        module: ":feature:chat",
+        badge: "Link Preview",
+        description: "BookmarkTitleWorker currently captures page <title> and domain. Rich OpenGraph image thumbnails and description parsing are pending future media expansion.",
+        syntax: "Bookmark.title",
+        status: "PENDING_EXT"
+      },
+      {
+        term: "Audio / Video Media Notes",
+        category: "FEATURE",
+        module: ":core:media",
+        badge: "Media Pipeline",
+        description: "Image pipeline downscales and compresses WebP/JPEG to <= 640 KB. Voice memo capture and video compression pipelines are pending future architecture slices.",
+        syntax: "Attachments.mimeType",
+        status: "PENDING_EXT"
+      }
+    ];
+
+    let currentFilter = 'ALL';
+    let searchQuery = '';
+
+    function renderGlossary() {
+      const container = document.getElementById('glossary-list');
+      const searchVal = searchQuery.trim().toLowerCase();
+      
+      const filtered = GLOSSARY_DATA.filter(item => {
+        const matchesCat = currentFilter === 'ALL' || item.category === currentFilter;
+        if (!matchesCat) return false;
+        if (!searchVal) return true;
+        return (
+          item.term.toLowerCase().includes(searchVal) ||
+          item.description.toLowerCase().includes(searchVal) ||
+          item.module.toLowerCase().includes(searchVal) ||
+          (item.syntax && item.syntax.toLowerCase().includes(searchVal)) ||
+          item.badge.toLowerCase().includes(searchVal)
+        );
+      });
+
+      document.getElementById('results-count').textContent = `Showing ${filtered.length} of ${GLOSSARY_DATA.length} terms`;
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full py-8 text-center text-[var(--muted-foreground)]">
+            <p class="font-medium">No matching glossary terms found.</p>
+            <p class="text-xs mt-1">Try clearing filters or searching for terms like "bold", "FTS5", "TODO", or "OAuth".</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(item => {
+        let statusBadge = '';
+        if (item.status === 'IMPLEMENTED') {
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">Active</span>';
+        } else if (item.status === 'PENDING_EXT') {
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">SPI Hook</span>';
+        } else if (item.status === 'PENDING_CONFIG') {
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">User Setup</span>';
+        }
+
+        return `
+          <div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] transition-colors flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-1">
+                <span class="font-mono font-semibold text-xs text-[var(--primary)]">${escapeHtml(item.term)}</span>
+                <div class="flex items-center gap-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--card-border)] text-[var(--muted-foreground)] font-mono">${escapeHtml(item.badge)}</span>
+                  ${statusBadge}
+                </div>
+              </div>
+              <p class="text-xs text-[var(--foreground)] leading-relaxed mb-2">${escapeHtml(item.description)}</p>
+            </div>
+            <div class="pt-2 border-t border-[var(--card-border)]/60 flex items-center justify-between text-[11px] text-[var(--muted-foreground)]">
+              <span class="font-mono text-[10px]">${escapeHtml(item.module)}</span>
+              ${item.syntax ? `<code class="bg-[var(--card-border)]/50 px-1 py-0.5 rounded text-[10px] font-mono text-[var(--code-foreground)]">${escapeHtml(item.syntax)}</code>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function updateCounts() {
+      document.getElementById('count-all').textContent = GLOSSARY_DATA.length;
+      document.getElementById('count-formatting').textContent = GLOSSARY_DATA.filter(i => i.category === 'FORMATTING').length;
+      document.getElementById('count-feature').textContent = GLOSSARY_DATA.filter(i => i.category === 'FEATURE').length;
+      document.getElementById('count-arch').textContent = GLOSSARY_DATA.filter(i => i.category === 'ARCH').length;
+      document.getElementById('count-backup').textContent = GLOSSARY_DATA.filter(i => i.category === 'BACKUP').length;
+      document.getElementById('count-security').textContent = GLOSSARY_DATA.filter(i => i.category === 'SECURITY').length;
+    }
+
+    // Event Listeners
+    document.getElementById('category-bar').addEventListener('click', (e) => {
+      const btn = e.target.closest('.cat-pill');
+      if (!btn) return;
+      currentFilter = btn.dataset.cat;
+      document.querySelectorAll('.cat-pill').forEach(b => {
+        b.classList.remove('bg-[var(--primary)]', 'text-[var(--primary-foreground)]');
+        b.classList.add('bg-[var(--card)]', 'border', 'border-[var(--border)]', 'text-[var(--muted-foreground)]');
+      });
+      btn.classList.add('bg-[var(--primary)]', 'text-[var(--primary-foreground)]');
+      btn.classList.remove('bg-[var(--card)]', 'border', 'border-[var(--border)]', 'text-[var(--muted-foreground)]');
+      renderGlossary();
+    });
+
+    const searchInput = document.getElementById('glossary-search');
+    const clearBtn = document.getElementById('clear-search');
+
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      if (searchQuery.length > 0) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+      renderGlossary();
+    });
+
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchQuery = '';
+      clearBtn.classList.add('hidden');
+      renderGlossary();
+      searchInput.focus();
+    });
+
+    // Initialize
+    updateCounts();
+    renderGlossary();
+  </script>
+</body>
+</html>

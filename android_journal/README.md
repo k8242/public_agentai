@@ -11,6 +11,12 @@ Key capabilities:
 - **Compact Weekly, Calendar & Two-Tier Hybrid Search**: Compact Weekly 1-line truncated view with ellipses and inline expand; monthly Calendar view with density dots and tag-subtree filter; FTS5 full-text + hidden auto-tag search split into Tier A (`<= 5 weeks` in-feed stepper) and Tier B (`> 5 weeks` compact result rows opening an interactive `±12h` context window).
 - **Two-Way Backup & Restore**: 3-tab Google Sheets workbook (`Entries`, `TagTree`, `SyncMeta`) + companion `ThreadLog_Media/` Google Drive folder (`drive.file` scope) with mandatory 3-way Dry-Run Diff Preview & per-conflict merge, plus zero-cloud-setup offline CSV, XLSX, and JSON+Media `.zip` exports/imports via Android SAF.
 
+## Documentation & Architecture Guide
+
+- **[ThreadLog User & Architecture Manual](docs/ThreadLog_User_and_Architecture_Manual.md)**: Exhaustive manual detailing all user features, messaging formatting syntax, 10-module clean architecture, Room SQLite FTS5 database design, Paging 3 fixed placeholder stability, 3-way sync engine, and pending implementation analysis.
+- **[Interactive Filterable System Glossary](docs/system_glossary.html)**: Standalone, searchable HTML tool to query formatting tokens, domain entities, architectural abstractions, and security guardrails.
+- **[Planning Artifacts](docs/plans/README.md)**: Chronological feature, bug-fix, and batch plans.
+
 ## Module Architecture
 
 The project is organized into 10 Gradle modules with **zero feature-to-feature dependencies**:
